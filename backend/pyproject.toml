@@ -1,0 +1,12 @@
+[project]
+name = "dreamlog-backend"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = ["granian", "httpx[http2]", "msgspec", "starlette", "uvloop", "aiosqlite", "sse-starlette", "tzdata"]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]

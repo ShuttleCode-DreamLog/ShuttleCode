@@ -60,3 +60,12 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# DreamLog local state and credentials
+backend/.local/
+backend/.venv/
+__pycache__/
+.pytest_cache/
+*.xcuserstate
+xcuserdata/
+*.key

@@ -1,0 +1,5 @@
+DATA_DIR=/home/ubuntu/dreamlog-data
+GEMINI_API_KEY=replace-with-team-key
+TLS_CERT=/home/ubuntu/dreamlog.crt
+TLS_KEY=/home/ubuntu/dreamlog.key
+PORT=443
