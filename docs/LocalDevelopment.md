@@ -14,7 +14,13 @@ Clone the code repository and run commands from its root. No wiki checkout or cl
 ./scripts/run-local.sh
 ```
 
-The script runs `uv sync --locked`, creates a local HTTPS certificate valid for 100 days if absent, and starts Granian on port 8443. Certificate/key/database files stay in ignored `backend/.local/`. Foundation sends no AI calls and uses a clearly labeled placeholder key locally. Later AI increments require a real server-side key and the provider checks in the wiki.
+The script runs `uv sync --locked`, creates a local HTTPS certificate valid for 100 days if absent, and starts Granian on port 8443. Certificate/key/database files stay in ignored `backend/.local/`. Foundation sends no AI calls. The script reads a Gemini API key from your macOS Keychain item `dreamlog-gemini-api-key` and otherwise uses a clearly labeled placeholder, which is enough until the AI increments. The deployed server keeps its own key in `/home/ubuntu/.env.sys`. To store a key locally, run this in Terminal and paste the key at the prompt, so it never enters shell history, a file or a chat:
+
+```sh
+security add-generic-password -U -a "$USER" -s dreamlog-gemini-api-key -w
+```
+
+Remove it with `security delete-generic-password -s dreamlog-gemini-api-key`. An exported `GEMINI_API_KEY` in the shell takes precedence over the Keychain. The provider checks in the wiki still apply before real dreams are sent.
 
 Keep this terminal running. Running the app from Xcode does not start the backend; Notes cannot save while this server is stopped. Wait for `Listening at: https://0.0.0.0:8443` before trying Save. In a second terminal:
 

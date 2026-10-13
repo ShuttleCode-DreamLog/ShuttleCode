@@ -17,5 +17,6 @@ export TLS_CERT="${TLS_CERT:-$PWD/.local/server.crt}"
 export TLS_KEY="${TLS_KEY:-$PWD/.local/server.key}"
 export PORT="${PORT:-8443}"
 # Foundation never calls an AI provider; a placeholder keeps the startup contract.
-export GEMINI_API_KEY="${GEMINI_API_KEY:-foundation-local-no-ai}"
+# A developer's own key stays in the macOS Keychain item dreamlog-gemini-api-key, never in the repository.
+export GEMINI_API_KEY="${GEMINI_API_KEY:-$(security find-generic-password -s dreamlog-gemini-api-key -w 2>/dev/null || echo foundation-local-no-ai)}"
 exec uv run --locked python dreamlogd.py
