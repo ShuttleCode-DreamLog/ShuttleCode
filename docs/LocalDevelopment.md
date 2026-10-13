@@ -38,7 +38,7 @@ Open `ios/DreamLog.xcodeproj`, select the shared DreamLog scheme and an iPhone s
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl keychain booted add-root-cert backend/.local/server.crt
 ```
 
-Run the app again. The default server URL is `https://127.0.0.1:8443`; it reaches the backend on the same Mac. The short development notice appears before the tabs. In Journal, + opens an editor; Done saves automatically, Revert abandons edits. Notes retains Save and supports Add photos; photo-only notes are allowed. Tap a saved row to read, edit or delete it. Unsent Journal text remains as a local draft; unsent Notes/photos stay only in the open editor. Settings lets you edit name, age and other profile fields, add/remove fields and Save profile. It also exposes history, the shared privacy text and Delete my journal. See [Architecture.md](Architecture.md) and [API.md](API.md).
+Run the app again. The committed server URL is the deployed course server `https://34.66.84.214`. To use the backend on this Mac instead, set the DreamLog target's `DREAMLOG_SERVER_URL` build setting to `https://127.0.0.1:8443` locally without committing it, or pass `DREAMLOG_SERVER_URL=https://127.0.0.1:8443` to `xcodebuild`. For the deployed server, trust its certificate instead of the local one: copy it with `scp ubuntu@34.66.84.214:/home/ubuntu/dreamlog.crt .` or ask the server owner, then run `xcrun simctl keychain booted add-root-cert dreamlog.crt`. The short development notice appears before the tabs. In Journal, + opens an editor; Done saves automatically, Revert abandons edits. Notes retains Save and supports Add photos; photo-only notes are allowed. Tap a saved row to read, edit or delete it. Unsent Journal text remains as a local draft; unsent Notes/photos stay only in the open editor. Settings lets you edit name, age and other profile fields, add/remove fields and Save profile. It also exposes history, the shared privacy text and Delete my journal. See [Architecture.md](Architecture.md) and [API.md](API.md).
 
 Run tests with Product → Test or:
 
@@ -48,9 +48,9 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Choose a simulator name installed on your Mac. For a real app/backend lifecycle test, keep the backend running, boot and trust the certificate on the selected simulator, then use the `DreamLogHTTPS` scheme with `-parallel-testing-enabled NO`. This explicitly enables the optional HTTPS integration test; the normal DreamLog scheme runs the isolated unit tests and skips that one network test.
+Choose a simulator name installed on your Mac. For a real app/backend lifecycle test, boot and trust the certificate of the configured backend on the selected simulator, then use the `DreamLogHTTPS` scheme with `-parallel-testing-enabled NO`. It uses the app's server URL: the deployed server by default, or a running local backend with the override above. This explicitly enables the optional HTTPS integration test; the normal DreamLog scheme runs the isolated unit tests and skips that one network test.
 
-The `DreamLogUI` scheme runs actual screen interaction tests against the local backend: first Notes save/reopen/delete and Journal automatic save/Revert/delete. Use the same simulator certificate trust and disable parallel clones as above. It creates only invented entries and deletes its own entries; it does not clear existing journals.
+The `DreamLogUI` scheme runs actual screen interaction tests against the configured backend: first Notes save/reopen/delete and Journal automatic save/Revert/delete. Use the same simulator certificate trust and disable parallel clones as above. It creates only invented entries and deletes its own entries; it does not clear existing journals.
 
 Keep simulator signing enabled: Keychain tests require the signed test host. No paid developer account is needed for a simulator. Personal signing team/bundle overrides and Xcode user settings are not committed.
 

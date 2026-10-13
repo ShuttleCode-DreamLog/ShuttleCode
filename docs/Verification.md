@@ -82,3 +82,13 @@ Disabling parallel simulator clones ensures the network test uses the simulator 
 - Backend schema version 4 adds the wiki §4.8.2 pattern tables and the `current_occurrences` view, because story map v2 places pattern discovery in Skeletal. `dream_vectors`, routes, task handlers and the sqlite-vector extension are not added.
 - Backend: **63 passed** on Python 3.14.7. The base-schema test now writes one row to each pattern table, reads the corrected tag text and output revision through `current_occurrences`, checks that the dream's patterns switch hides it, checks the correction kind and pair-order constraints, and confirms whole-user deletion empties every pattern table. The additive upgrade test now also covers version 3.
 - A real version 3 local database was upgraded by the ordinary `scripts/run-local.sh` start: user_version 4, all new tables and indexes present, `PRAGMA foreign_key_check` empty. The HTTP/2 smoke test passed against it. No iOS change; the app was not rebuilt for this change.
+
+## Course server deployment — 13 October 2026
+
+- Google Cloud e2-micro in us-central1-a, Ubuntu 26.04.1 LTS, external IP 34.66.84.214. The team reports the IP as reserved; this was not checked independently, because the local gcloud account has no access to the project. Deployed commit `e58f3f0` of the `database` branch with uv 0.13.0 and Python 3.14.4. Backend tests on the server: **63 passed**.
+- The systemd unit is enabled and active. Granian listens on 443 with a certificate made from the course `selfsigned.cnf`: SAN IP 34.66.84.214, serverAuth, CA:TRUE, valid until 21 January 2027.
+- From the Mac over the internet, with certificate validation: 401 without a credential, 200 for GET `/v1/me`, 204 for DELETE. The HTTP/2 smoke test, pointed at the server and its certificate, passed and deleted its temporary user.
+- Restart checks: after `systemctl kill -s KILL`, systemd restarted the service (NRestarts=1). After a full VM reboot the service was listening 21 seconds after boot, at the same external IP.
+- Server database after these checks: user_version 4, WAL, 20 tables, empty `PRAGMA foreign_key_check`.
+- App: `DREAMLOG_SERVER_URL` now defaults to `https://34.66.84.214`. With the server certificate trusted on the iPhone 18 Pro / iOS 27.0 simulator (Xcode 27.0), DreamLogHTTPS: **31 tests passed, 0 failed**. They include the real lifecycle test against the deployed server (Journal, Notes with a photo, Profile, whole-journal deletion); the server's request log shows its requests. DreamLogUI was not run against the server, and no physical phone was checked.
+- Not done: `apt upgrade`, a real `GEMINI_API_KEY` (a placeholder until the first AI increment), sqlite-vector.

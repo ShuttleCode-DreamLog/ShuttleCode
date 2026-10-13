@@ -12,7 +12,7 @@ The privacy notice and Settings render the same six `privacyParts` constants in 
 
 ## Remaining external acceptance
 
-The local backend implements Starlette on Granian with HTTPS, SQLite schema initialization, Bearer user resolution and owned GET/PUT/DELETE `/v1/me`. `backend/deploy/dreamlog.service` and `environment.example` provide the Ubuntu configuration. Actual remote deployment still requires the target host, access and TLS certificate; no Ubuntu deployment result is claimed.
+The local backend implements Starlette on Granian with HTTPS, SQLite schema initialization, Bearer user resolution and owned GET/PUT/DELETE `/v1/me`. `backend/deploy/dreamlog.service` and `environment.example` provide the Ubuntu configuration. They are deployed on the course server at `https://34.66.84.214`; see [ProductionTransition.md](ProductionTransition.md).
 
 The current reminder value is null because reminders are a later increment. Enabling AI or recording requires their implementations and confirmed provider terms. Course-end cleanup remains an operational release requirement; the notice states the project plan, not an already-running deletion schedule. See [ProductionTransition.md](ProductionTransition.md).
 

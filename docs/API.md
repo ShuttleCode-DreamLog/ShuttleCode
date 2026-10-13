@@ -1,6 +1,6 @@
 # DreamLog JSON API
 
-Local origin: `https://127.0.0.1:8443`. Production uses the same paths at its configured HTTPS origin. Every route below requires `Authorization: Bearer <lowercase UUID>`. The app stores its credential only in device-only Keychain. Standalone development clients should use their own test UUID; never copy or print a real user's credential.
+Local origin: `https://127.0.0.1:8443`. The deployed course server uses the same paths at `https://34.66.84.214`. Every route below requires `Authorization: Bearer <lowercase UUID>`. The app stores its credential only in device-only Keychain. Standalone development clients should use their own test UUID; never copy or print a real user's credential.
 
 Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milliseconds. IDs are lowercase UUIDs chosen by the client before saving and reused on retry. Unknown body fields do not grant access. Errors use `{"error":"code","message":"message","request_id":"…","current_revision":null}` and the `X-Request-ID` header; conflicts include the current revision.
 
