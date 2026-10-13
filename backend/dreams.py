@@ -30,6 +30,15 @@ class DreamSave(msgspec.Struct, kw_only=True):
     permissions: Permissions | None = None
 
 
+class PermissionsChange(msgspec.Struct):
+    transcription: bool | msgspec.UnsetType = msgspec.UNSET
+    analysis: bool | msgspec.UnsetType = msgspec.UNSET
+    discussion: bool | msgspec.UnsetType = msgspec.UNSET
+    history: bool | msgspec.UnsetType = msgspec.UNSET
+    patterns: bool | msgspec.UnsetType = msgspec.UNSET
+    visuals: bool | msgspec.UnsetType = msgspec.UNSET
+
+
 class JournalFilter(msgspec.Struct):
     query: str = ''
     tag: str | None = None
@@ -111,6 +120,22 @@ async def save_dream(request):
         # AI integration point: enqueue revision-keyed dream processing here in this transaction.
         # This is where the future worker will call the provider API after commit, with owner/permission checks.
     return json_response({'dream': dream_value(result)}, 200 if stored else 201)
+
+
+async def save_permissions(request):
+    identity = await resolve_user(request)
+    dream_id = check_id(request.path_params['dream_id'])
+    body = await read_body(request, PermissionsChange)
+    async with db.tx() as connection:
+        stored = await owned_dream(identity, dream_id)
+        changes = {f'allow_{key}': int(value) for key in PERMISSIONS if (value := getattr(body, key)) is not msgspec.UNSET and int(value) != stored[f'allow_{key}']}
+        if changes:
+            # Column names come solely from PERMISSIONS; the text revision stays, so open editors keep saving.
+            await connection.execute(f"UPDATE dreams SET {','.join(f'{column}=?' for column in changes)},updated_at=? WHERE id=? AND user_id=?", (*changes.values(), config.now(), dream_id, identity))
+            # AI integration point: apply the wiki 4.3.6 effects here, in this transaction: source_removed when allow_history turns off,
+            # transcript cleanup when allow_transcription turns off, and schedule_processing when a switch turns on.
+        result = await owned_dream(identity, dream_id)
+    return json_response({'dream': dream_value(result)})
 
 
 def paging(request):

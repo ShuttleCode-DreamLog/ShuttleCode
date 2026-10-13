@@ -18,6 +18,10 @@ with httpx.Client(base_url='https://127.0.0.1:8443', verify=ssl.create_default_c
     assert created.status_code == 201
     assert client.get(path, headers=headers).json()['dream']['text'] == payload['text']
     assert len(client.get('/v1/dreams', headers=headers).json()['items']) == 1
+    switched = client.put(path + '/permissions', headers=headers, json={'analysis': False, 'history': False})
+    assert switched.status_code == 200 and switched.json()['dream']['revision'] == 1
+    assert switched.json()['dream']['permissions'] == {'transcription': True, 'analysis': False, 'discussion': True, 'history': False, 'patterns': True, 'visuals': True}
+    assert client.get(path, headers=headers).json()['dream']['permissions'] == switched.json()['dream']['permissions']
     assert client.delete(path, headers=headers).status_code == 204
     assert client.get(path, headers=headers).status_code == 404
     note_path = f'/v1/memories/{uuid4()}'
@@ -49,4 +53,4 @@ with httpx.Client(base_url='https://127.0.0.1:8443', verify=ssl.create_default_c
         assert fault.status_code == 500 and fault.json()['error'] == 'internal'
         assert 'https-smoke-private-marker' not in fault.text
         assert fault.json()['request_id'] == fault.headers['x-request-id']
-    print(f'Granian HTTPS smoke passed: identity + Journal/Notes/Profile/photos read/write/delete; protocol={response.http_version}')
+    print(f'Granian HTTPS smoke passed: identity + Journal/permissions/Notes/Profile/photos read/write/delete; protocol={response.http_version}')

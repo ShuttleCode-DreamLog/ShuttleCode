@@ -103,3 +103,9 @@ Disabling parallel simulator clones ensures the network test uses the simulator 
 
 - After pull request #2 was merged, the server checkout moved from `database` to `foundation` at `b50121e`. A `.backup` copy of the version 4 database was taken first and removed once the upgrade worked.
 - The restart upgraded the database to version 5: `dream_vectors` and its index are present, the existing user was kept, and `PRAGMA foreign_key_check` is empty. From the Mac: 401 without a credential, and the HTTP/2 smoke test passed against the server.
+
+## Dream permissions route — 13 October 2026
+
+- `PUT /v1/dreams/{id}/permissions` changes only the switches sent, in one transaction with the ownership read, without raising the text revision. Backend: **92 passed**, 28 of them in `tests/test_permissions.py`: partial changes, all six off and back one at a time, repeats and `{}` without a write, creation permissions, a text save after a change with no reload, 404 for another user or a missing dream, 401 for missing or malformed identity, 400 for nine malformed bodies, wrong content type, malformed IDs, 413 for an oversized body, ignored unknown fields, 405 for other methods with the dream kept, concurrent changes to different switches, a seeded 300-step random sequence checked against a reference model, and list/search/delete/user deletion afterwards.
+- Mutation check: six deliberately injected bugs (no ownership check, omitted switches reset, revision raised, a write when nothing changed, only the first switch applied, null accepted) each made the new tests fail; the original code was restored.
+- Local Granian HTTPS: the HTTP/2 smoke test, now including a permissions change and read-back, passed; a curl walkthrough gave 201, 200 with revision 1, 400 for null, 404 for another user. Not deployed: the server deploys `foundation` after the pull request is merged. No iOS change.

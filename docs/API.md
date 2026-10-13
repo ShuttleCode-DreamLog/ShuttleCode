@@ -9,7 +9,7 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | Resource | Read | Write | Delete |
 | --- | --- | --- | --- |
 | Device settings | `GET /v1/me` | `PUT /v1/me` | `DELETE /v1/me` deletes all owned data |
-| Journal | `GET /v1/dreams`, `GET /v1/dreams/{id}` | `PUT /v1/dreams/{id}` | `DELETE /v1/dreams/{id}` |
+| Journal | `GET /v1/dreams`, `GET /v1/dreams/{id}` | `PUT /v1/dreams/{id}`, `PUT /v1/dreams/{id}/permissions` | `DELETE /v1/dreams/{id}` |
 | Life notes | `GET /v1/memories`, `GET /v1/memories/{id}` | `PUT /v1/memories/{id}` | `DELETE /v1/memories/{id}` |
 | Note photos | `GET /v1/memories/{id}/photos/{photo_id}` | `PUT /v1/memories/{id}/photos/{photo_id}` | `DELETE /v1/memories/{id}/photos/{photo_id}` |
 | Profile | `GET /v1/me/profile` | `PUT /v1/me/profile` | Remove keys or send empty `fields`; whole-user deletion also clears it |
@@ -31,13 +31,23 @@ Create with `base_revision: 0`; edit with the last returned revision:
 }
 ```
 
-Text and dream_date are required. Dates use real `YYYY-MM-DD` calendar dates. Source is required on creation and immutable afterwards. Optional title/mood: omission preserves, null clears; blank title becomes null. Mood values: calm, happy, excited, confused, sad, anxious, afraid, angry. Optional creation permissions: transcription, analysis, discussion, history, patterns and visuals, all booleans defaulting true. Stored permissions are preserved by this route.
+Text and dream_date are required. Dates use real `YYYY-MM-DD` calendar dates. Source is required on creation and immutable afterwards. Optional title/mood: omission preserves, null clears; blank title becomes null. Mood values: calm, happy, excited, confused, sad, anxious, afraid, angry. Optional creation permissions: transcription, analysis, discussion, history, patterns and visuals, all booleans defaulting true. Stored permissions are preserved by this route; change them with the permissions route below.
 
 Success: 201 on creation, 200 on update/repeat, `{"dream":{…}}`. The object contains `id`, `text`, `revision`, `dream_date`, `title`, `mood`, `source`, `audio_status`, `audio_ms`, `heard_text`, `permissions`, `tasks`, `organization`, `created_at`, `updated_at`. This build returns empty tasks and null organization; no AI task is scheduled. Text limit: 20,000 characters; title: 120. Text must not be whitespace only. Text changes increase revision; metadata changes do not. A different text with a stale revision gets 409 `revision_conflict`.
 
 Search: `POST /v1/dreams/search` with `{"query":"lake"}`. Optional mood, from_date, to_date and tag filters can be combined. This is literal case-insensitive SQLite title/text matching (non-ASCII case folding is limited); `%` and `_` are literal characters. Search text is sent in the body, not the URL. Tag filtering is reserved for later organization data. Unsent local drafts are not server search results.
 
 Journal list items contain id, dream_date, title, mood, revision, audio_status, preview, summary, status, favorite_visual_id and updated_at. Summary/favorite are null in this build.
+
+## Dream permissions
+
+`PUT /v1/dreams/{id}/permissions` changes the six AI switches of an owned dream:
+
+```json
+{"analysis": false, "history": false}
+```
+
+Each of `transcription`, `analysis`, `discussion`, `history`, `patterns` and `visuals` is an optional boolean; only the switches sent change. Send all six as false for the app's "Keep out of AI processing" control. `{}` or a repeat of the stored values changes nothing. Success is 200 with `{"dream":{…}}`. The text revision is not raised, so an open editor keeps saving with its revision; `updated_at` changes only when a switch changes. `null`, numbers, strings or a non-object body get 400; another user's or a missing dream gets 404. Unknown fields are ignored and never change other dream fields. No AI work exists yet, so a change has no further effect; the wiki 4.3.6 effects are marked as an `AI integration point` in `dreams.py`.
 
 ## Notes
 

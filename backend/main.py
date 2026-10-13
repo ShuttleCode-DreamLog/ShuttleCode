@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.routing import Route
 import db
-from dreams import delete_dream, get_dream, list_dreams, save_dream, search_dreams
+from dreams import delete_dream, get_dream, list_dreams, save_dream, save_permissions, search_dreams
 from memories import delete_memory, get_memory, list_memories, save_memory
 from profiles import get_profile, save_profile
 from photos import delete_photo, get_photo, save_photo
@@ -79,6 +79,7 @@ routes.extend([
     Route("/v1/dreams/{dream_id}", get_dream, methods=["GET"]),
     Route("/v1/dreams/{dream_id}", save_dream, methods=["PUT"]),
     Route("/v1/dreams/{dream_id}", delete_dream, methods=["DELETE"]),
+    Route("/v1/dreams/{dream_id}/permissions", save_permissions, methods=["PUT"]),
 ])
 if os.environ.get("DREAMLOG_FAULTS") == "1":
     routes.append(Route("/v1/faults", fault, methods=["POST"]))

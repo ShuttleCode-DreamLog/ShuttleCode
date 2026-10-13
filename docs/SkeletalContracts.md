@@ -13,7 +13,7 @@ This page is the agreement between the backend and the iOS app for the Skeletal 
 | Generate an AI summary and tags | `dream.organization`, `dream.tasks`, journal item `summary` and `status`, task retry | Placeholders today: `null`, `[]`, `null`, `"ready"` |
 | Automatic dream analysis with its sources | `GET /v1/dreams/{id}/analysis`, `POST /v1/dreams/{id}/analysis/refresh` | Planned |
 | Include life notes in a dream's analysis | `memory` entries in `analysis.context` | Planned, with analysis |
-| Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Dream planned; note implemented |
+| Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Server implemented for both; the app's dream switches are missing |
 | Recurring patterns with counts and evidence | `GET /v1/patterns` | Planned |
 | Rename, dismiss, split a pattern | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Planned |
 
@@ -93,6 +93,8 @@ Journal item: `summary` is the effective summary of a current organization, othe
 | `JournalItem.status: String` | `status: ServerStatus` (`ready`, `processing`, `attention`, `unknown`) |
 
 ## Dream permissions (wiki 4.5.3)
+
+Implemented on the server; see [API.md](API.md#dream-permissions). The app still needs the six switches and the "Keep out of AI processing" control.
 
 `PUT /v1/dreams/{dream_id}/permissions` with any of `transcription`, `analysis`, `discussion`, `history`, `patterns`, `visuals` (booleans, each optional): 200 with `dream`. Only the fields sent change; the revision is not raised. The app's "Keep out of AI processing" control sends all six as false; turning it off sends nothing (wiki 4.5.8). The dream save keeps ignoring `permissions` after the first save.
 
