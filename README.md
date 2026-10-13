@@ -8,6 +8,7 @@ Journal and Notes support creation, reading, editing and deletion. Journal saves
 - [中文新手指南：Swift、数据库与增量开发](docs/BeginnerGuide.zh-CN.md)
 - [Architecture and collaborator file map](docs/Architecture.md)
 - [Callable JSON API contracts](docs/API.md)
+- [Contracts for the remaining Skeletal features](docs/SkeletalContracts.md)
 - [Automatic journal save, note photos and AI integration points](docs/EditorAndPhotos.md)
 - [Privacy acknowledgment and acceptance](docs/PrivacyAcceptance.md)
 - [Text journal usage and implementation](docs/TextJournal.md)

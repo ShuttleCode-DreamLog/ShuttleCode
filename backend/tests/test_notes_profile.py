@@ -84,15 +84,17 @@ async def test_new_routes_require_bearer(client):
         assert (await client.request(method,path,json=note())).status_code == 401
 
 
-@pytest.mark.parametrize('version', [1, 2, 3])
+@pytest.mark.parametrize('version', [1, 2, 3, 4])
 async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     path = tmp_path / 'v1.db'
     connection = sqlite3.connect(path)
     schema = Path(db.__file__).with_name('schema.sql').read_text()
     connection.executescript(schema)
-    connection.execute('DROP VIEW current_occurrences')
-    for table in ('pattern_separations', 'pattern_corrections', 'pattern_memberships', 'pattern_groups', 'occurrences'):
-        connection.execute(f'DROP TABLE {table}')
+    connection.execute('DROP TABLE dream_vectors')
+    if version <= 3:
+        connection.execute('DROP VIEW current_occurrences')
+        for table in ('pattern_separations', 'pattern_corrections', 'pattern_memberships', 'pattern_groups', 'occurrences'):
+            connection.execute(f'DROP TABLE {table}')
     if version <= 2:
         connection.execute('DROP TABLE memory_photos')
     if version == 1:
@@ -106,10 +108,11 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     connection.close()
     upgraded = await db.open_database(path)
     try:
-        assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == 4
+        assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == 5
         assert (await upgraded.execute_fetchall('SELECT text FROM dreams WHERE id=?',(dream_id,)))[0][0] == 'Kept sample'
         assert not await upgraded.execute_fetchall('SELECT * FROM profiles')
         assert not await upgraded.execute_fetchall('SELECT * FROM pattern_groups')
+        assert not await upgraded.execute_fetchall('SELECT * FROM dream_vectors')
         assert not await upgraded.execute_fetchall('SELECT * FROM current_occurrences')
         assert not await upgraded.execute_fetchall('PRAGMA foreign_key_check')
     finally:

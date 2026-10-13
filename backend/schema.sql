@@ -189,6 +189,16 @@ CREATE TABLE IF NOT EXISTS checkins (
     updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS dream_vectors (
+    dream_id TEXT PRIMARY KEY REFERENCES dreams(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    dream_revision INTEGER NOT NULL,
+    embedding BLOB NOT NULL,
+    model TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS occurrences (
     tag_id TEXT PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -297,6 +307,8 @@ CREATE INDEX IF NOT EXISTS pattern_memberships_index_23 ON pattern_memberships(g
 CREATE INDEX IF NOT EXISTS pattern_memberships_index_24 ON pattern_memberships(dream_id);
 
 CREATE INDEX IF NOT EXISTS pattern_separations_index_25 ON pattern_separations(other_dream_id);
+
+CREATE INDEX IF NOT EXISTS dream_vectors_index_26 ON dream_vectors(user_id);
 
 DROP VIEW IF EXISTS effective_tags;
 CREATE VIEW effective_tags AS

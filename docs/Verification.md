@@ -92,3 +92,9 @@ Disabling parallel simulator clones ensures the network test uses the simulator 
 - Server database after these checks: user_version 4, WAL, 20 tables, empty `PRAGMA foreign_key_check`.
 - App: `DREAMLOG_SERVER_URL` now defaults to `https://34.66.84.214`. With the server certificate trusted on the iPhone 18 Pro / iOS 27.0 simulator (Xcode 27.0), DreamLogHTTPS: **31 tests passed, 0 failed**. They include the real lifecycle test against the deployed server (Journal, Notes with a photo, Profile, whole-journal deletion); the server's request log shows its requests. DreamLogUI was not run against the server, and no physical phone was checked.
 - Not done: `apt upgrade`, a real `GEMINI_API_KEY` (a placeholder until the first AI increment), sqlite-vector.
+
+## dream_vectors and Skeletal contracts — 13 October 2026
+
+- Schema version 5 adds `dream_vectors` (wiki §4.8.2). `index_dream`, the first pattern task, writes it together with `occurrences`, so Skeletal pattern discovery needs it. Backend: **64 passed**. The base-schema test writes a `dream_vectors` row and checks its deletion with the user; the additive upgrade test covers versions 1–4.
+- The version 4 local database upgraded to version 5 through `scripts/run-local.sh`: the table and its index are present, `PRAGMA foreign_key_check` is empty, and the HTTP/2 smoke test passed. The deployed server stays at version 4 until its next deploy.
+- [SkeletalContracts.md](SkeletalContracts.md) records the routes and fields that the remaining Skeletal cards need, condensed from the wiki's Section 4. No route was implemented.

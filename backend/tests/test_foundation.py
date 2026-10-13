@@ -141,6 +141,7 @@ async def test_base_schema_accepts_all_records_and_deletes_together(client):
         ('INSERT INTO tasks(id,user_id,type,request_key,dream_id,run_after,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)', (str(uuid4()),user,'organize','base-schema',dream,1,1,1)),
         ('INSERT INTO usage VALUES(?,?,?,?)', (user,'2026-10-08','text',1)),
         ('INSERT INTO dreams(id,user_id,dream_date,source,created_at,updated_at) VALUES(?,?,?,?,?,?)', (other,user,'2026-10-09','text',1,1)),
+        ('INSERT INTO dream_vectors VALUES(?,?,?,?,?,?,?)', (dream,user,1,bytes(8),'test',2,1)),
         ('INSERT INTO occurrences VALUES(?,?,?,?,?,?,?,?)', (tag,user,dream,'blue lake',bytes(8),'test',2,1)),
         ('INSERT INTO pattern_groups(id,user_id,label,description,model,instruction_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)', (group,user,'Lakes','a lake','test','test',1,1)),
         ('INSERT INTO pattern_memberships(tag_id,group_id,user_id,dream_id,shared_element,model,instruction_version,created_at) VALUES(?,?,?,?,?,?,?,?)', (tag,group,user,dream,'a lake','test','test',1)),
@@ -186,7 +187,7 @@ async def test_base_schema_accepts_all_records_and_deletes_together(client):
                 await connection.execute(sql, values)
     assert not await db.rwdb.execute_fetchall('PRAGMA foreign_key_check')
     assert (await client.delete('/v1/me', headers=headers)).status_code == 204
-    for table in ('users','dreams','outputs','checkins','memories','messages','tags','org_corrections','conversations','discussion_corrections','sources','tasks','usage','occurrences','pattern_groups','pattern_memberships','pattern_corrections','pattern_separations'):
+    for table in ('users','dreams','outputs','checkins','memories','messages','tags','org_corrections','conversations','discussion_corrections','sources','tasks','usage','dream_vectors','occurrences','pattern_groups','pattern_memberships','pattern_corrections','pattern_separations'):
         assert not await db.rwdb.execute_fetchall(f'SELECT * FROM {table}')
 
 
@@ -196,7 +197,7 @@ async def test_schema_mismatch_refuses_startup(tmp_path):
     connection = sqlite3.connect(path)
     connection.execute('PRAGMA user_version=99')
     connection.close()
-    with pytest.raises(RuntimeError, match='Schema version 99; expected 4'):
+    with pytest.raises(RuntimeError, match='Schema version 99; expected 5'):
         await db.open_database(path)
 
 

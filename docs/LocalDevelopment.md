@@ -71,6 +71,6 @@ The same backend reads `DATA_DIR`, `TLS_CERT`, `TLS_KEY`, `PORT` and `GEMINI_API
 - Notes Save fails / Done asks to discard: keep the editor open, start `./scripts/run-local.sh`, and retry Save without losing the text. The updated editor shows a save-failure alert and Done also offers Save and close or Keep editing. A backend must be running for storage; Xcode only starts the app.
 - Connection/certificate error: check the running backend, port, server URL, certificate dates/SAN and simulator trust. Trust the certificate separately on each simulator you use.
 - Keychain error: retain code signing, unlock the device, then retry. The app intentionally does not generate a temporary fallback ID.
-- Schema version error: do not silently overwrite the database. Backend schema version 4 upgrades versions 1–3 additively with profiles, note photos and pattern tables and preserves existing records; other mismatches refuse startup. The phone draft schema remains version 1.
+- Schema version error: do not silently overwrite the database. Backend schema version 5 upgrades versions 1–4 additively with profiles, note photos, pattern tables and dream vectors and preserves existing records; other mismatches refuse startup. The phone draft schema remains version 1.
 
 The app never shows its identity. Reinstalling alone does not reliably clear Keychain or delete server data; use Delete my journal for a full reset.
