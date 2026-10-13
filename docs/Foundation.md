@@ -31,7 +31,7 @@ Tests live in `backend/tests/` and `ios/DreamLogTests/`. Samples live in `sample
 
 ## Facts still needed
 
-The user selected local-first development: another Mac must be able to clone and run the app/backend. Cloud deployment is a later milestone; the team will provide the Ubuntu host/SSH access, static IP and cloud selection then. No remote deployment is claimed. Configuration and future database/App Store differences are recorded separately in docs/ProductionTransition.md. Provider plan/retention terms and project-end date remain unconfirmed: use the wiki's provisional notice wording, then bump noticeVersion when those facts are supplied. Confirm course tutorial contracts before remote deployment. Test only invented journal data until the later privacy/permission and provider checks are complete.
+The user selected local-first development: another Mac must be able to clone and run the app/backend. The cloud milestone followed on 13 October 2026: the backend runs on a Google Cloud Ubuntu VM at `https://34.66.84.214`, recorded in docs/ProductionTransition.md. Configuration and future database/App Store differences are recorded separately in docs/ProductionTransition.md. Provider plan/retention terms and project-end date remain unconfirmed: use the wiki's provisional notice wording, then bump noticeVersion when those facts are supplied. Confirm course tutorial contracts before remote deployment. Test only invented journal data until the later privacy/permission and provider checks are complete.
 
 ## Later increments
 

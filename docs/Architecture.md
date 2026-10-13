@@ -27,7 +27,7 @@ All Swift files above are in `ios/DreamLog/`; backend files are in `backend/`. R
 
 - A normal profile field: add one `ProfileField` to `profileFields` in `ProfileSettings.swift`. Keys and values already round-trip through the dictionary API and SQLite JSON. Users can add or remove fields in Settings too. Add special backend validation in `profiles.py` only when the new field needs it; age already has a numeric rule. All values are strings.
 - A new feature: put its route functions and SQL in one backend module, register routes in `main.py`, add the corresponding JSON value types/APIClient methods and a SwiftUI screen with an observable state model. Follow an existing feature rather than introducing a service/ORM/repository layer.
-- New persistence: change `schema.sql`, increment `SCHEMA_VERSION` and add an explicit, tested upgrade path in `db.py`. Backend version 3 adds note photos to versions 1/2 without replacing data; the phone draft schema remains version 1.
+- New persistence: change `schema.sql`, increment `SCHEMA_VERSION` and add an explicit, tested upgrade path in `db.py`. Backend version 3 adds note photos to versions 1/2 without replacing data; version 4 adds the pattern tables to versions 1–3 the same way. The phone draft schema remains version 1.
 - Privacy text: edit `privacyParts` and increase `noticeVersion` in `PrivacyNotice.swift`. First launch and Settings read the same six short parts. The user requested provisional, brief copy; this supersedes the wiki's full copy for this development build. The acknowledgment gate remains active.
 - Cloud: configure the HTTPS origin, TLS and data directory. The mobile app continues calling the same API. Managed database/release differences belong in [ProductionTransition.md](ProductionTransition.md).
 
@@ -43,4 +43,6 @@ This is the user's requested CRUD foundation, not a full Increment 5/AI pipeline
 
 Journal now commits automatically on leaving the editor and offers Revert instead of Save. Notes also supports photo attachments. [EditorAndPhotos.md](EditorAndPhotos.md) records the interaction rules, storage choice, callable photo API and explicit `AI integration point` comments in the code.
 
-Short privacy copy is provisional development content. Detailed provider, recording and project-end policies must be restored before those features or a release. Voice, analysis, discussion and media remain future work. No remote deployment or App Store submission is claimed.
+Story map v2 (revised 11 October 2026) places recurring patterns with rename, dismiss and split in its Skeletal tier, ahead of the wiki's Arc C stretch placement. Schema version 4 therefore already holds the wiki §4.8.2 pattern tables (`occurrences`, `pattern_groups`, `pattern_memberships`, `pattern_corrections`, `pattern_separations`) and the `current_occurrences` view. No route, task handler or vector extension writes them yet. `dream_vectors` serves the MVP history search and is not added.
+
+Short privacy copy is provisional development content. Detailed provider, recording and project-end policies must be restored before those features or a release. Voice, analysis, discussion and media remain future work. The backend is deployed on the course server at `https://34.66.84.214` ([ProductionTransition.md](ProductionTransition.md)); no App Store submission is claimed.

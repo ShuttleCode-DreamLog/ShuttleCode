@@ -62,9 +62,11 @@ THEN: the app cancels in-flight requests, calls DELETE /v1/me, then removes loca
 - build settings with privacy text, history switch, and delete my journal
 
 ### Current implementation direction
-Read the project wiki for top-level design. Foundation, text journals, Notes CRUD and extensible Profile fields are implemented locally; preserve the same API and business logic for cloud deployment. See docs/Architecture.md, docs/API.md, docs/LocalDevelopment.md and docs/ProductionTransition.md. Record any later deployment/database/release differences explicitly.
+Read the project wiki for top-level design. Foundation, text journals, Notes CRUD and extensible Profile fields are implemented locally; preserve the same API and business logic for cloud deployment. The backend is deployed on a Google Cloud Ubuntu VM at https://34.66.84.214 (docs/ProductionTransition.md); the app's committed DREAMLOG_SERVER_URL points there and local development overrides it. See docs/Architecture.md, docs/API.md, docs/LocalDevelopment.md and docs/ProductionTransition.md. Record any later deployment/database/release differences explicitly.
 
 The user subsequently requested read/write foundations for every tab, extensible profile fields, collaborator APIs, and brief provisional privacy copy. This supersedes full-length privacy prose for the current development build. Keep the acknowledgment/version gate and six shared short parts. Notes now supplies memory CRUD only, not the full AI Increment 5. Profile uses a string dictionary and its own endpoint. Read docs/Architecture.md and docs/API.md first for the current file map and contracts. Use flat functions, direct SQL and existing observable models; do not add generic service/ORM layers.
+
+Where the wiki and the team's story map v2 (revised 2026-10-11) disagree on scope, the story map decides. Its Skeletal tier includes recurring patterns with rename, dismiss and split, so backend schema version 4 adds the wiki §4.8.2 pattern tables now; their routes, tasks and the sqlite-vector extension follow with the pattern feature. It also includes syncing queued dreams when the connection returns, which the course allows teams to skip; DreamLog builds it.
 
 ### Text journal acceptance criteria
 

@@ -126,7 +126,7 @@ async def test_base_schema_accepts_all_records_and_deletes_together(client):
     headers = credential()
     await client.get('/v1/me', headers=headers)
     user = headers['Authorization'][7:]
-    dream, output, checkin, memory, message, tag = [str(uuid4()) for _ in range(6)]
+    dream, output, checkin, memory, message, tag, other, group = [str(uuid4()) for _ in range(8)]
     statements = [
         ('INSERT INTO dreams(id,user_id,dream_date,source,created_at,updated_at) VALUES(?,?,?,?,?,?)', (dream,user,'2026-10-08','text',1,1)),
         ('INSERT INTO outputs(id,user_id,dream_id,type,dream_revision,content,model,instruction_version,created_at) VALUES(?,?,?,?,?,?,?,?,?)', (output,user,dream,'organization',1,'{}','test','test',1)),
@@ -140,12 +140,23 @@ async def test_base_schema_accepts_all_records_and_deletes_together(client):
         ('INSERT INTO sources(id,user_id,output_id,label,kind,source_id,source_revision) VALUES(?,?,?,?,?,?,?)', (str(uuid4()),user,output,'M1','memory',memory,1)),
         ('INSERT INTO tasks(id,user_id,type,request_key,dream_id,run_after,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)', (str(uuid4()),user,'organize','base-schema',dream,1,1,1)),
         ('INSERT INTO usage VALUES(?,?,?,?)', (user,'2026-10-08','text',1)),
+        ('INSERT INTO dreams(id,user_id,dream_date,source,created_at,updated_at) VALUES(?,?,?,?,?,?)', (other,user,'2026-10-09','text',1,1)),
+        ('INSERT INTO occurrences VALUES(?,?,?,?,?,?,?,?)', (tag,user,dream,'blue lake',bytes(8),'test',2,1)),
+        ('INSERT INTO pattern_groups(id,user_id,label,description,model,instruction_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)', (group,user,'Lakes','a lake','test','test',1,1)),
+        ('INSERT INTO pattern_memberships(tag_id,group_id,user_id,dream_id,shared_element,model,instruction_version,created_at) VALUES(?,?,?,?,?,?,?,?)', (tag,group,user,dream,'a lake','test','test',1)),
+        ('INSERT INTO pattern_corrections(group_id,dream_id,kind,user_id,created_at) VALUES(?,?,?,?,?)', (group,other,'dismissed',user,1)),
+        ('INSERT INTO pattern_separations VALUES(?,?,?,?)', (*sorted((dream,other)),user,1)),
     ]
     async with db.tx() as connection:
         for sql, values in statements:
             await connection.execute(sql, values)
     tags = await db.rwdb.execute_fetchall('SELECT * FROM effective_tags')
     assert tags[0]['text'] == 'blue lake' and tags[0]['corrected'] == 1
+    occurrences = await db.rwdb.execute_fetchall('SELECT * FROM current_occurrences')
+    assert occurrences[0]['description'] == 'blue lake' and occurrences[0]['dream_revision'] == 1
+    async with db.tx() as connection:
+        await connection.execute('UPDATE dreams SET allow_patterns=0 WHERE id=?', (dream,))
+    assert not await db.rwdb.execute_fetchall('SELECT * FROM current_occurrences')
     violations = [
         ('UPDATE users SET use_history=2 WHERE id=?', (user,)),
         ('UPDATE users SET reminder_weekday=0 WHERE id=?', (user,)),
@@ -166,6 +177,8 @@ async def test_base_schema_accepts_all_records_and_deletes_together(client):
         ('UPDATE discussion_corrections SET note=?', ('',)),
         ('UPDATE memories SET event_precision=?', ('exact',)),
         ('UPDATE checkins SET status=?', ('invalid',)),
+        ('UPDATE pattern_corrections SET kind=?', ('invalid',)),
+        ('UPDATE pattern_separations SET dream_id=other_dream_id', ()),
     ]
     for sql, values in violations:
         with pytest.raises(sqlite3.IntegrityError):
@@ -173,7 +186,7 @@ async def test_base_schema_accepts_all_records_and_deletes_together(client):
                 await connection.execute(sql, values)
     assert not await db.rwdb.execute_fetchall('PRAGMA foreign_key_check')
     assert (await client.delete('/v1/me', headers=headers)).status_code == 204
-    for table in ('users','dreams','outputs','checkins','memories','messages','tags','org_corrections','conversations','discussion_corrections','sources','tasks','usage'):
+    for table in ('users','dreams','outputs','checkins','memories','messages','tags','org_corrections','conversations','discussion_corrections','sources','tasks','usage','occurrences','pattern_groups','pattern_memberships','pattern_corrections','pattern_separations'):
         assert not await db.rwdb.execute_fetchall(f'SELECT * FROM {table}')
 
 
@@ -183,7 +196,7 @@ async def test_schema_mismatch_refuses_startup(tmp_path):
     connection = sqlite3.connect(path)
     connection.execute('PRAGMA user_version=99')
     connection.close()
-    with pytest.raises(RuntimeError, match='Schema version 99; expected 3'):
+    with pytest.raises(RuntimeError, match='Schema version 99; expected 4'):
         await db.open_database(path)
 
 

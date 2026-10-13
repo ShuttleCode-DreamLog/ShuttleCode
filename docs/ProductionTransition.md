@@ -6,7 +6,7 @@ The requested first milestone is a cloneable Mac setup. Local and deployed build
 
 | Concern | Local | Cloud / release |
 | --- | --- | --- |
-| App origin | `DREAMLOG_SERVER_URL=https://127.0.0.1:8443` | Override with the production HTTPS origin at build time |
+| App origin | Override at build time: `DREAMLOG_SERVER_URL=https://127.0.0.1:8443` | Committed default: `DREAMLOG_SERVER_URL=https://34.66.84.214` |
 | Backend process | `scripts/run-local.sh`, port 8443 | `backend/deploy/dreamlog.service`, port 443 on Ubuntu |
 | TLS | Developer-generated certificate explicitly trusted by simulator | Publicly trusted certificate for the chosen domain; configure TLS_CERT/TLS_KEY and renewal |
 | Storage | Ignored `backend/.local/data` | Persistent private directory on the server via DATA_DIR |
@@ -47,4 +47,4 @@ Cloud deployment must validate quotas/provider terms before AI use. The current 
 
 `backend/deploy/dreamlog.service` and `environment.example` follow the wiki's filesystem paths. Supply the environment file privately at `/home/ubuntu/.env.sys` (mode 600), run `uv sync --locked` in the backend directory, install the service unit, enable/start it, and inspect the journal. Provide a persistent DATA_DIR writable only by the service user. TLS material must match the deployed hostname/address.
 
-No cloud deployment has been performed: local-first is the selected milestone. A real server address, access and TLS/domain decisions are needed at the cloud milestone.
+The course server was deployed on 13 October 2026: a Google Cloud e2-micro VM in us-central1-a running Ubuntu 26.04.1 LTS, at the external IP 34.66.84.214, which the team reports as reserved. It runs the `database` branch from `/home/ubuntu/dreamlog` under the unit above, with DATA_DIR `/home/ubuntu/dreamlog-data` and a certificate made from the course `selfsigned.cnf` at `/home/ubuntu/dreamlog.crt`, valid until 21 January 2027. Its public copy is committed at `backend/deploy/dreamlog.crt` for simulators and phones; replace that file whenever the certificate is regenerated. That configuration sets `basicConstraints = critical,CA:true`, so the certificate is a certificate authority: whoever holds `/home/ubuntu/dreamlog.key` could sign certificates that a trusting phone accepts for any site, and testers must be told before they trust it. `GEMINI_API_KEY` holds a placeholder until the first AI increment. Cloud snapshots and backups must stay off. To update: pull the code into `/home/ubuntu/dreamlog`, run `uv sync --locked` in `backend/`, run `sudo systemctl restart dreamlog`, then read `sudo journalctl -fu dreamlog`.

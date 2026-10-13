@@ -189,6 +189,63 @@ CREATE TABLE IF NOT EXISTS checkins (
     updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS occurrences (
+    tag_id TEXT PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
+    description TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    model TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pattern_groups (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    label TEXT,
+    user_label TEXT,
+    description TEXT,
+    explanation TEXT,
+    evidence_key TEXT,
+    tried_key TEXT,
+    model TEXT NOT NULL,
+    instruction_version TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pattern_memberships (
+    tag_id TEXT PRIMARY KEY REFERENCES occurrences(tag_id) ON DELETE CASCADE,
+    group_id TEXT NOT NULL REFERENCES pattern_groups(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
+    shared_element TEXT,
+    difference TEXT,
+    model TEXT NOT NULL,
+    instruction_version TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pattern_corrections (
+    group_id TEXT NOT NULL REFERENCES pattern_groups(id) ON DELETE CASCADE,
+    dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('dismissed','split')),
+    note TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(group_id,dream_id)
+);
+
+CREATE TABLE IF NOT EXISTS pattern_separations (
+    dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
+    other_dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(dream_id,other_dream_id),
+    CHECK(dream_id<other_dream_id)
+);
+
 CREATE INDEX IF NOT EXISTS dreams_index_0 ON dreams(user_id,dream_date,created_at);
 
 CREATE INDEX IF NOT EXISTS dreams_index_1 ON dreams(user_id,mood);
@@ -229,6 +286,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS memories_index_18 ON memories(checkin_id) WHER
 
 CREATE UNIQUE INDEX IF NOT EXISTS checkins_index_19 ON checkins(user_id,week_start);
 
+CREATE INDEX IF NOT EXISTS occurrences_index_20 ON occurrences(user_id);
+
+CREATE INDEX IF NOT EXISTS occurrences_index_21 ON occurrences(dream_id);
+
+CREATE INDEX IF NOT EXISTS pattern_groups_index_22 ON pattern_groups(user_id);
+
+CREATE INDEX IF NOT EXISTS pattern_memberships_index_23 ON pattern_memberships(group_id);
+
+CREATE INDEX IF NOT EXISTS pattern_memberships_index_24 ON pattern_memberships(dream_id);
+
+CREATE INDEX IF NOT EXISTS pattern_separations_index_25 ON pattern_separations(other_dream_id);
+
 DROP VIEW IF EXISTS effective_tags;
 CREATE VIEW effective_tags AS
 SELECT t.id AS tag_id,t.dream_id,t.user_id,t.output_id,t.category,t.excerpt,
@@ -237,3 +306,11 @@ SELECT t.id AS tag_id,t.dream_id,t.user_id,t.output_id,t.category,t.excerpt,
 FROM tags t JOIN outputs o ON o.id=t.output_id
 LEFT JOIN org_corrections c ON c.output_id=t.output_id AND c.category=t.category AND c.original_text=t.text
 WHERE COALESCE(c.text,t.text)<>'';
+
+DROP VIEW IF EXISTS current_occurrences;
+CREATE VIEW current_occurrences AS
+SELECT oc.tag_id,oc.user_id,oc.dream_id,o.dream_revision,d.dream_date,t.category,t.text AS description,t.excerpt
+FROM occurrences oc JOIN effective_tags t ON t.tag_id=oc.tag_id
+JOIN outputs o ON o.id=t.output_id
+JOIN dreams d ON d.id=oc.dream_id
+WHERE t.output_status='current' AND d.allow_patterns=1 AND d.allow_analysis=1;

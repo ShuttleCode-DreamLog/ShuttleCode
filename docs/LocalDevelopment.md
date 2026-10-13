@@ -38,7 +38,7 @@ Open `ios/DreamLog.xcodeproj`, select the shared DreamLog scheme and an iPhone s
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl keychain booted add-root-cert backend/.local/server.crt
 ```
 
-Run the app again. The default server URL is `https://127.0.0.1:8443`; it reaches the backend on the same Mac. The short development notice appears before the tabs. In Journal, + opens an editor; Done saves automatically, Revert abandons edits. Notes retains Save and supports Add photos; photo-only notes are allowed. Tap a saved row to read, edit or delete it. Unsent Journal text remains as a local draft; unsent Notes/photos stay only in the open editor. Settings lets you edit name, age and other profile fields, add/remove fields and Save profile. It also exposes history, the shared privacy text and Delete my journal. See [Architecture.md](Architecture.md) and [API.md](API.md).
+Run the app again. The committed server URL is the deployed course server `https://34.66.84.214`. To use the backend on this Mac instead, set the DreamLog target's `DREAMLOG_SERVER_URL` build setting to `https://127.0.0.1:8443` locally without committing it, or pass `DREAMLOG_SERVER_URL=https://127.0.0.1:8443` to `xcodebuild`. For the deployed server, trust its committed certificate instead of the local one: `xcrun simctl keychain booted add-root-cert backend/deploy/dreamlog.crt`. The short development notice appears before the tabs. In Journal, + opens an editor; Done saves automatically, Revert abandons edits. Notes retains Save and supports Add photos; photo-only notes are allowed. Tap a saved row to read, edit or delete it. Unsent Journal text remains as a local draft; unsent Notes/photos stay only in the open editor. Settings lets you edit name, age and other profile fields, add/remove fields and Save profile. It also exposes history, the shared privacy text and Delete my journal. See [Architecture.md](Architecture.md) and [API.md](API.md).
 
 Run tests with Product → Test or:
 
@@ -48,13 +48,15 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Choose a simulator name installed on your Mac. For a real app/backend lifecycle test, keep the backend running, boot and trust the certificate on the selected simulator, then use the `DreamLogHTTPS` scheme with `-parallel-testing-enabled NO`. This explicitly enables the optional HTTPS integration test; the normal DreamLog scheme runs the isolated unit tests and skips that one network test.
+Choose a simulator name installed on your Mac. For a real app/backend lifecycle test, boot and trust the certificate of the configured backend on the selected simulator, then use the `DreamLogHTTPS` scheme with `-parallel-testing-enabled NO`. It uses the app's server URL: the deployed server by default, or a running local backend with the override above. This explicitly enables the optional HTTPS integration test; the normal DreamLog scheme runs the isolated unit tests and skips that one network test.
 
-The `DreamLogUI` scheme runs actual screen interaction tests against the local backend: first Notes save/reopen/delete and Journal automatic save/Revert/delete. Use the same simulator certificate trust and disable parallel clones as above. It creates only invented entries and deletes its own entries; it does not clear existing journals.
+The `DreamLogUI` scheme runs actual screen interaction tests against the configured backend: first Notes save/reopen/delete and Journal automatic save/Revert/delete. Use the same simulator certificate trust and disable parallel clones as above. It creates only invented entries and deletes its own entries; it does not clear existing journals.
 
 Keep simulator signing enabled: Keychain tests require the signed test host. No paid developer account is needed for a simulator. Personal signing team/bundle overrides and Xcode user settings are not committed.
 
 ## Another backend address or a physical phone
+
+To use the deployed server from a physical phone, send `backend/deploy/dreamlog.crt` to the phone (AirDrop or email), install the downloaded profile in Settings, then turn on full trust for it under Settings → General → About → Certificate Trust Settings. This certificate is a certificate authority ([ProductionTransition.md](ProductionTransition.md)): trust it only on test phones and remove it when testing ends.
 
 The Xcode build setting `DREAMLOG_SERVER_URL` is the single app endpoint configuration. Override it in a local configuration or on the build command, for example `DREAMLOG_SERVER_URL=https://api.example.org`. The generated Info.plist supplies it to AppModel. Use the HTTPS origin only, without `/v1`.
 
@@ -69,6 +71,6 @@ The same backend reads `DATA_DIR`, `TLS_CERT`, `TLS_KEY`, `PORT` and `GEMINI_API
 - Notes Save fails / Done asks to discard: keep the editor open, start `./scripts/run-local.sh`, and retry Save without losing the text. The updated editor shows a save-failure alert and Done also offers Save and close or Keep editing. A backend must be running for storage; Xcode only starts the app.
 - Connection/certificate error: check the running backend, port, server URL, certificate dates/SAN and simulator trust. Trust the certificate separately on each simulator you use.
 - Keychain error: retain code signing, unlock the device, then retry. The app intentionally does not generate a temporary fallback ID.
-- Schema version error: do not silently overwrite the database. Backend schema version 3 upgrades versions 1/2 additively with profiles/note photos and preserves existing records; other mismatches refuse startup. The phone draft schema remains version 1.
+- Schema version error: do not silently overwrite the database. Backend schema version 4 upgrades versions 1–3 additively with profiles, note photos and pattern tables and preserves existing records; other mismatches refuse startup. The phone draft schema remains version 1.
 
 The app never shows its identity. Reinstalling alone does not reliably clear Keychain or delete server data; use Delete my journal for a full reset.
