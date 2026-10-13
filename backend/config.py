@@ -2,7 +2,7 @@ import os
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MAX_NOTE_PHOTOS = 5
 MAX_PHOTO_BYTES = 5000000
 MAX_JSON_BYTES = 262144
