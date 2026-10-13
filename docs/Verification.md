@@ -98,3 +98,8 @@ Disabling parallel simulator clones ensures the network test uses the simulator 
 - Schema version 5 adds `dream_vectors` (wiki §4.8.2). `index_dream`, the first pattern task, writes it together with `occurrences`, so Skeletal pattern discovery needs it. Backend: **64 passed**. The base-schema test writes a `dream_vectors` row and checks its deletion with the user; the additive upgrade test covers versions 1–4.
 - The version 4 local database upgraded to version 5 through `scripts/run-local.sh`: the table and its index are present, `PRAGMA foreign_key_check` is empty, and the HTTP/2 smoke test passed. The deployed server stays at version 4 until its next deploy.
 - [SkeletalContracts.md](SkeletalContracts.md) records the routes and fields that the remaining Skeletal cards need, condensed from the wiki's Section 4. No route was implemented.
+
+## Server redeploy at schema version 5 — 13 October 2026
+
+- After pull request #2 was merged, the server checkout moved from `database` to `foundation` at `b50121e`. A `.backup` copy of the version 4 database was taken first and removed once the upgrade worked.
+- The restart upgraded the database to version 5: `dream_vectors` and its index are present, the existing user was kept, and `PRAGMA foreign_key_check` is empty. From the Mac: 401 without a credential, and the HTTP/2 smoke test passed against the server.
