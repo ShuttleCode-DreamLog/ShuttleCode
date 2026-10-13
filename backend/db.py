@@ -49,7 +49,7 @@ async def open_database(path):
             await rwdb.execute(f"PRAGMA {setting}")
         version = (await rwdb.execute_fetchall("PRAGMA user_version"))[0][0]
         exists = await rwdb.execute_fetchall("SELECT 1 FROM sqlite_master WHERE name='users'")
-        if (version or exists) and version not in (1, 2, 3, config.SCHEMA_VERSION):
+        if (version or exists) and version not in (1, 2, 3, 4, config.SCHEMA_VERSION):
             raise RuntimeError(f"Schema version {version}; expected {config.SCHEMA_VERSION}")
         # Additive upgrades preserve journals, profiles and notes from earlier versions.
         schema = Path(__file__).with_name("schema.sql").read_text()
