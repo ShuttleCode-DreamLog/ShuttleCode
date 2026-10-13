@@ -38,7 +38,7 @@ Open `ios/DreamLog.xcodeproj`, select the shared DreamLog scheme and an iPhone s
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl keychain booted add-root-cert backend/.local/server.crt
 ```
 
-Run the app again. The committed server URL is the deployed course server `https://34.66.84.214`. To use the backend on this Mac instead, set the DreamLog target's `DREAMLOG_SERVER_URL` build setting to `https://127.0.0.1:8443` locally without committing it, or pass `DREAMLOG_SERVER_URL=https://127.0.0.1:8443` to `xcodebuild`. For the deployed server, trust its certificate instead of the local one: copy it with `scp ubuntu@34.66.84.214:/home/ubuntu/dreamlog.crt .` or ask the server owner, then run `xcrun simctl keychain booted add-root-cert dreamlog.crt`. The short development notice appears before the tabs. In Journal, + opens an editor; Done saves automatically, Revert abandons edits. Notes retains Save and supports Add photos; photo-only notes are allowed. Tap a saved row to read, edit or delete it. Unsent Journal text remains as a local draft; unsent Notes/photos stay only in the open editor. Settings lets you edit name, age and other profile fields, add/remove fields and Save profile. It also exposes history, the shared privacy text and Delete my journal. See [Architecture.md](Architecture.md) and [API.md](API.md).
+Run the app again. The committed server URL is the deployed course server `https://34.66.84.214`. To use the backend on this Mac instead, set the DreamLog target's `DREAMLOG_SERVER_URL` build setting to `https://127.0.0.1:8443` locally without committing it, or pass `DREAMLOG_SERVER_URL=https://127.0.0.1:8443` to `xcodebuild`. For the deployed server, trust its committed certificate instead of the local one: `xcrun simctl keychain booted add-root-cert backend/deploy/dreamlog.crt`. The short development notice appears before the tabs. In Journal, + opens an editor; Done saves automatically, Revert abandons edits. Notes retains Save and supports Add photos; photo-only notes are allowed. Tap a saved row to read, edit or delete it. Unsent Journal text remains as a local draft; unsent Notes/photos stay only in the open editor. Settings lets you edit name, age and other profile fields, add/remove fields and Save profile. It also exposes history, the shared privacy text and Delete my journal. See [Architecture.md](Architecture.md) and [API.md](API.md).
 
 Run tests with Product → Test or:
 
@@ -55,6 +55,8 @@ The `DreamLogUI` scheme runs actual screen interaction tests against the configu
 Keep simulator signing enabled: Keychain tests require the signed test host. No paid developer account is needed for a simulator. Personal signing team/bundle overrides and Xcode user settings are not committed.
 
 ## Another backend address or a physical phone
+
+To use the deployed server from a physical phone, send `backend/deploy/dreamlog.crt` to the phone (AirDrop or email), install the downloaded profile in Settings, then turn on full trust for it under Settings → General → About → Certificate Trust Settings. This certificate is a certificate authority ([ProductionTransition.md](ProductionTransition.md)): trust it only on test phones and remove it when testing ends.
 
 The Xcode build setting `DREAMLOG_SERVER_URL` is the single app endpoint configuration. Override it in a local configuration or on the build command, for example `DREAMLOG_SERVER_URL=https://api.example.org`. The generated Info.plist supplies it to AppModel. Use the HTTPS origin only, without `/v1`.
 

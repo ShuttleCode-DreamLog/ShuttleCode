@@ -16,4 +16,4 @@ Journal and Notes support creation, reading, editing and deletion. Journal saves
 - [Verification record](docs/Verification.md)
 - [Coding instructions](CLAUDE.md)
 
-The app connects to the deployed course server `https://34.66.84.214` by default: trust that server's certificate on the simulator, then run `ios/DreamLog.xcodeproj`. For a backend on your Mac, start `./scripts/run-local.sh`, trust its certificate and override `DREAMLOG_SERVER_URL`. See the local guide for exact commands.
+The app connects to the deployed course server `https://34.66.84.214` by default: trust that server's certificate `backend/deploy/dreamlog.crt` on the simulator, then run `ios/DreamLog.xcodeproj`. For a backend on your Mac, start `./scripts/run-local.sh`, trust its certificate and override `DREAMLOG_SERVER_URL`. See the local guide for exact commands.
