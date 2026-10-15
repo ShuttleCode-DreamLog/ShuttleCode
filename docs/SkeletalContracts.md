@@ -9,8 +9,8 @@ This page is the agreement between the backend and the iOS app for the Skeletal 
 | Start the server, set up the journal, open settings | `/v1/me`, `/v1/me/profile` | Implemented |
 | Type and save, browse, reopen, edit, delete a dream | `/v1/dreams`, `/v1/dreams/{id}` | Implemented |
 | Sync queued dreams when the connection returns | Existing `PUT /v1/dreams/{id}`: client-chosen ID, `base_revision`, a repeated save returns the stored dream | Server implemented; the app's automatic resend is missing |
-| Filter the journal by date or tag | `POST /v1/dreams/search` with `from_date`, `to_date`, `tag` | Server implemented; tags exist only after organization; the app has text search only |
-| Generate an AI summary and tags | `dream.organization`, `dream.tasks`, journal item `summary` and `status`, task retry | Task worker, `dream.tasks`, journal `status` and retry implemented; `organization` and `summary` stay `null` until the `organize` handler |
+| Filter the journal by date or tag | `POST /v1/dreams/search` with `from_date`, `to_date`, `tag` | Server implemented, including tags from `organize`; the app has text search only |
+| Generate an AI summary and tags | `dream.organization`, `dream.tasks`, journal item `summary` and `status`, task retry | Server implemented: `organize` runs on each new text revision and fills `organization` and `summary`; the app's display is missing |
 | Automatic dream analysis with its sources | `GET /v1/dreams/{id}/analysis`, `POST /v1/dreams/{id}/analysis/refresh` | Planned |
 | Include life notes in a dream's analysis | `memory` entries in `analysis.context` | Planned, with analysis |
 | Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Server implemented for both; the app's dream switches are missing |
@@ -62,6 +62,8 @@ Error codes with their own wording in the app (wiki 4.4.6): `cap_reached` and `c
 | `TaskInfo { id, type: String, status: String }` | `TaskInfo { id, type: TaskType, status: TaskStatus, errorCode: String?, dreamId: String?, subjectId: String?, sourceRevision: Int?, updatedAt: Date }` with the two enums above plus `unknown` |
 
 ## Dream object and journal item (wiki 4.5.3)
+
+Implemented on the server; see [API.md](API.md#summary-and-tags). The app still needs the target `Organization` and `Tag` types below.
 
 `dream.tasks`: for the dream's present revision, the newest task of each type, without `generate_image` and `generate_video`; `transcribe` always counts. `dream.organization`: null until an organization output exists.
 

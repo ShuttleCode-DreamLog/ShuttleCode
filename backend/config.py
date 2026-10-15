@@ -15,13 +15,16 @@ RETRY_DELAYS = (15, 60)
 RATE_LIMIT_DELAYS = (60, 300)
 WORKER_MAX_WAIT_SECONDS = 30
 START_WORKER = True
+PROVIDER_TIMEOUT_SECONDS = 120
+MAX_TAGS = 30
+TAG_CATEGORIES = ("person", "place", "object", "action", "emotion", "theme")
 PORT = int(os.environ.get("PORT", "443"))
 TLS_CERT = Path(os.environ.get("TLS_CERT", "/home/ubuntu/dreamlog.crt"))
 TLS_KEY = Path(os.environ.get("TLS_KEY", "/home/ubuntu/dreamlog.key"))
 
 
 def data_directory():
-    for key in ("DATA_DIR", "GEMINI_API_KEY"):
+    for key in ("DATA_DIR", "GEMINI_API_KEY", "TEXT_MODEL"):
         if not os.environ.get(key):
             raise RuntimeError(f"Missing required configuration: {key}")
     return Path(os.environ["DATA_DIR"])

@@ -1,11 +1,47 @@
 from datetime import datetime, timezone
+from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import msgspec
 from starlette.responses import Response
 import db
 import config
+import tasks
 from web import RequestError, json_response, read_body, resolve_user
+
+
+async def save_output(connection, identity, dream_id, output_type, dream_revision, content, model, instruction_version):
+    # A generation is a new record with a new ID, not an upsert: the old output's tags and corrections must go with it (wiki 4.3.4).
+    for row in await connection.execute_fetchall("SELECT id FROM outputs WHERE dream_id=? AND type=?", (dream_id, output_type)):
+        await connection.execute("UPDATE outputs SET status='outdated' WHERE id=?", (row["id"],))
+        await source_changed(connection, "output", row["id"])
+    output_id = str(uuid4())
+    await connection.execute("INSERT INTO outputs(id,user_id,dream_id,type,dream_revision,content,model,instruction_version,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (output_id, identity, dream_id, output_type, dream_revision, msgspec.json.encode(content).decode(), model, instruction_version, config.now()))
+    await connection.execute("DELETE FROM outputs WHERE dream_id=? AND type=? AND id<>?", (dream_id, output_type, output_id))
+    return output_id
+
+
+async def source_changed(connection, kind, source_id):
+    await connection.execute("UPDATE outputs SET status='outdated' WHERE id IN (SELECT output_id FROM sources WHERE kind=? AND source_id=? AND output_id IS NOT NULL)", (kind, source_id))
+    # AI integration point: from the discussion increment, also mark stale every discussion whose ok reply has such a sources row.
+
+
+async def dream_text_changed(connection, dream_id):
+    await connection.execute("UPDATE outputs SET status='outdated' WHERE dream_id=?", (dream_id,))
+    await source_changed(connection, "dream", dream_id)
+    # AI integration point: discussion staleness, pattern groups and visual versions join here in their increments (wiki 4.3.5).
+
+
+async def schedule_processing(connection, dream_id):
+    rows = await connection.execute_fetchall("SELECT * FROM dreams WHERE id=?", (dream_id,))
+    if not rows:
+        return
+    dream = rows[0]
+    # Organizing waits while recorded audio may still become the text, so a voice dream is organized once (wiki 4.3.6, rule 2).
+    pending = dream["audio_status"] in ("expected", "uploaded") and dream["allow_transcription"] and not await connection.execute_fetchall("SELECT 1 FROM tasks WHERE dream_id=? AND type='transcribe' AND status='failed' AND error_code NOT IN ('cap_reached','ceiling_reached')", (dream_id,))
+    if dream["text"] and not pending and dream["allow_analysis"]:
+        await tasks.schedule(connection, "organize", f"organize:{dream_id}:{dream['revision']}", dream["user_id"], dream_id, None, dream["revision"])
+    # AI integration point: rules 1, 3 and 4 (transcribe, analyze, index_dream) are added with their handlers (wiki 4.1, rule 6).
 
 
 def utc_day():

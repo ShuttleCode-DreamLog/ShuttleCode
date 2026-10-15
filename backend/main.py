@@ -12,8 +12,10 @@ from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.routing import Route
+import httpx
 import config
 import db
+import providers
 import tasks
 from dreams import delete_dream, get_dream, list_dreams, save_dream, save_permissions, search_dreams
 from memories import delete_memory, get_memory, list_memories, save_memory
@@ -43,6 +45,7 @@ async def lifespan(app):
         for path in (directory / "audio").iterdir():
             if path.is_file() and (path.suffix == ".part" or path.name.split('.')[0] not in uploaded):
                 path.unlink()
+        providers.client = httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=None, write=None, pool=None), http2=True)
         worker = asyncio.create_task(tasks.worker()) if config.START_WORKER else None
         yield
     finally:
@@ -52,6 +55,8 @@ async def lifespan(app):
                 await worker
             except asyncio.CancelledError:
                 pass
+        if providers.client is not None:
+            await providers.client.aclose()
         await db.rwdb.close()
 
 

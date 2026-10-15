@@ -30,10 +30,11 @@ def registry(monkeypatch):
     return handlers
 
 
+# Analysis is off so these generic queue tests get no automatic organize task.
 async def journal(client, headers=None):
     headers = headers or credential()
     dream_id = str(uuid4())
-    response = await client.put(f'/v1/dreams/{dream_id}', headers=headers, json={'base_revision': 0, 'text': 'An invented dream by a blue lake.', 'dream_date': '2026-10-08', 'source': 'text'})
+    response = await client.put(f'/v1/dreams/{dream_id}', headers=headers, json={'base_revision': 0, 'text': 'An invented dream by a blue lake.', 'dream_date': '2026-10-08', 'source': 'text', 'permissions': {'analysis': False}})
     assert response.status_code == 201
     return headers, headers['Authorization'][7:], dream_id
 

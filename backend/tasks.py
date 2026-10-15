@@ -66,8 +66,10 @@ async def release(connection, timestamp):
 async def restart():
     async with db.tx() as connection:
         timestamp = config.now()
+        stuck = await connection.execute_fetchall("SELECT dream_id FROM tasks WHERE status='running' AND attempts>=? AND type IN ('transcribe','organize') AND dream_id IS NOT NULL", (config.MAX_ATTEMPTS,))
         await release(connection, timestamp)
-        # AI integration point: from the organize increment, call records.schedule_processing for each transcribe or organize task failed above.
+        for row in stuck:
+            await records.schedule_processing(connection, row["dream_id"])
         await connection.execute("UPDATE tasks SET status='waiting',attempts=0,error_code=NULL,run_after=?,updated_at=? WHERE status='failed' AND error_code='provider_config'", (timestamp, timestamp))
 
 
@@ -96,8 +98,10 @@ async def settle(task, outcome):
                 delays = config.RATE_LIMIT_DELAYS if code in ("rate_limited", "provider_config") else config.RETRY_DELAYS
                 await connection.execute("UPDATE tasks SET status='waiting',error_code=?,run_after=?,updated_at=? WHERE id=? AND status='running'", (code, timestamp + delays[task["attempts"] - 1] * 1000, timestamp, task["id"]))
             case Failed(code, _):
-                await connection.execute("UPDATE tasks SET status='failed',error_code=?,updated_at=? WHERE id=? AND status='running'", (code, timestamp, task["id"]))
-                # AI integration point: from the organize increment, a failed transcribe or organize task (not cap_reached or ceiling_reached) calls records.schedule_processing here.
+                cursor = await connection.execute("UPDATE tasks SET status='failed',error_code=?,updated_at=? WHERE id=? AND status='running'", (code, timestamp, task["id"]))
+                # A failed transcript or summary must not hold back what can proceed without it; a reached limit holds everything back (wiki 4.3.3).
+                if cursor.rowcount and task["type"] in ("transcribe", "organize") and code not in ("cap_reached", "ceiling_reached") and task["dream_id"]:
+                    await records.schedule_processing(connection, task["dream_id"])
             case RunAgain(seconds):
                 await connection.execute("UPDATE tasks SET status='waiting',attempts=0,error_code=NULL,run_after=?,updated_at=? WHERE id=? AND status='running'", (timestamp + int(seconds * 1000), timestamp, task["id"]))
 

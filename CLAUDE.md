@@ -74,7 +74,7 @@ Where the wiki and the team's story map v2 (revised 2026-10-11) disagree on scop
 - Unsent text persists in local SQLite drafts. Reading never submits a draft; uncertain saves reconcile with the server before retrying.
 - Bearer identity controls every journal route. Another user's entry ID grants no access.
 - Atomic saves preserve entry IDs; text revisions prevent stale edits from overwriting stored text. Conflicts and deletion failures preserve local input.
-- Text capture schedules no AI tasks. Voice and other later wiki increments remain separate.
+- Saving a text dream schedules `organize` (summary and tags, a story map Skeletal card) for each new text revision; title, mood and date changes schedule nothing. Voice and other later wiki increments remain separate.
 
 ### Current editor and photo requirements
 

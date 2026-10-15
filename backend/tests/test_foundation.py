@@ -14,6 +14,7 @@ from main import app, application
 async def client(tmp_path, monkeypatch):
     monkeypatch.setenv('DATA_DIR', str(tmp_path))
     monkeypatch.setenv('GEMINI_API_KEY', 'test-placeholder-not-used')
+    monkeypatch.setenv('TEXT_MODEL', 'test-text-model')
     monkeypatch.setattr(config, 'START_WORKER', False)
     async with application.router.lifespan_context(application):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://test') as client:
