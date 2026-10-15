@@ -16,6 +16,8 @@ flowchart LR
 | Feature | Screen and state | API / backend | Storage |
 | --- | --- | --- | --- |
 | Journal | `JournalView`, `JournalModel`, `DreamEditor`, `DreamModel` | `/v1/dreams`, `dreams.py` (routes and the `organize` handler), `providers.py` (Gemini text adapter) | `dreams`, `outputs`, `tags`; unsent drafts in phone SQLite |
+| Analysis | (planned: analysis screen) | `/v1/dreams/{id}/analysis`, `/analysis/refresh`, `analysis.py` (context selection and the `analyze` handler) | `outputs` (type `analysis`), `sources` |
+| Patterns | (planned: patterns screen) | `/v1/patterns`, `/v1/patterns/groups/{id}/label`, `/dismiss`, `/split`, `patterns.py` (indexing, matching, findings), `providers.embed` | `dream_vectors`, `occurrences`, `pattern_*` tables (sqlite-vector) |
 | Notes | `NotesView`, `NoteEditorView`, `NotesModel`, `NoteEditorModel` | `/v1/memories`, `memories.py`, `photos.py` | `memories`, `memory_photos`; unsent editor state in memory |
 | Profile | `ProfileSettings`, `ProfileModel` | `/v1/me/profile`, `profiles.py` | `profiles.fields_json` |
 | Settings and deletion | `Settings`, `AppModel` | `/v1/me`, `records.py` | `users`; delete cascades profiles, notes and journals |

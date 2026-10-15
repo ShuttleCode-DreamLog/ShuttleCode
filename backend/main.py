@@ -13,11 +13,13 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.routing import Route
 import httpx
+import analysis
 import config
 import db
+import patterns
 import providers
 import tasks
-from dreams import delete_dream, get_dream, list_dreams, save_dream, save_permissions, search_dreams
+from dreams import delete_dream, get_dream, list_dreams, save_correction, save_dream, save_permissions, search_dreams
 from memories import delete_memory, get_memory, list_memories, save_memory
 from profiles import get_profile, save_profile
 from photos import delete_photo, get_photo, save_photo
@@ -45,6 +47,7 @@ async def lifespan(app):
         for path in (directory / "audio").iterdir():
             if path.is_file() and (path.suffix == ".part" or path.name.split('.')[0] not in uploaded):
                 path.unlink()
+        await patterns.backfill()
         providers.client = httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=None, write=None, pool=None), http2=True)
         worker = asyncio.create_task(tasks.worker()) if config.START_WORKER else None
         yield
@@ -101,6 +104,13 @@ routes.extend([
     Route("/v1/dreams/{dream_id}", save_dream, methods=["PUT"]),
     Route("/v1/dreams/{dream_id}", delete_dream, methods=["DELETE"]),
     Route("/v1/dreams/{dream_id}/permissions", save_permissions, methods=["PUT"]),
+    Route("/v1/dreams/{dream_id}/corrections", save_correction, methods=["PUT"]),
+    Route("/v1/dreams/{dream_id}/analysis", analysis.get_analysis, methods=["GET"]),
+    Route("/v1/dreams/{dream_id}/analysis/refresh", analysis.refresh_analysis, methods=["POST"]),
+    Route("/v1/patterns", patterns.get_patterns, methods=["GET"]),
+    Route("/v1/patterns/groups/{group_id}/label", patterns.label_group, methods=["PUT"]),
+    Route("/v1/patterns/groups/{group_id}/dismiss", patterns.dismiss_group, methods=["POST"]),
+    Route("/v1/patterns/groups/{group_id}/split", patterns.split_group, methods=["POST"]),
     Route("/v1/tasks/{task_id}/retry", tasks.retry_task, methods=["POST"]),
 ])
 if os.environ.get("DREAMLOG_FAULTS") == "1":

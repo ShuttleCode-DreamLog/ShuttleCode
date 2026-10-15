@@ -14,6 +14,8 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | Note photos | `GET /v1/memories/{id}/photos/{photo_id}` | `PUT /v1/memories/{id}/photos/{photo_id}` | `DELETE /v1/memories/{id}/photos/{photo_id}` |
 | Profile | `GET /v1/me/profile` | `PUT /v1/me/profile` | Remove keys or send empty `fields`; whole-user deletion also clears it |
 | AI tasks | In `dream.tasks` and journal `status` | `POST /v1/tasks/{id}/retry` | Deleted with their dream or the whole journal |
+| Analysis | `GET /v1/dreams/{id}/analysis` | `POST /v1/dreams/{id}/analysis/refresh` | Deleted with its dream |
+| Patterns | `GET /v1/patterns` | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Groups without members, corrections or a user label are removed by the next refresh |
 
 Lists return `{"items":[…],"has_more":false}`. Pass `limit` (1–200, default 50) and `offset` (default 0). Journal order is date descending, creation time descending, ID ascending; Notes order is recording time descending, ID ascending. Notes additionally accepts `ongoing=true` or `ongoing=false`.
 
@@ -130,7 +132,56 @@ When `organize` completes, `dream.organization` holds the result for the revisio
  "created_at": 1760371200000}
 ```
 
-It is `null` until the first result. After a text edit it stays visible with `status` `outdated` until the new revision is organized; the journal `summary` is null meanwhile. `category` is `person`, `place`, `object`, `action`, `emotion` or `theme`; `feeling` is `stated` or `inferred` for an emotion and null otherwise. Every excerpt is a passage of the dream text as written, checked by the backend; items without a matching excerpt are dropped, labels are lower case, and at most 30 tags are kept. `corrected`, `removed` and `summary_corrected` reflect the user's corrections; the corrections route itself is not built yet. Only the dream text is sent to Gemini, never the title, mood or notes, and the daily `text` limit counts each attempt.
+It is `null` until the first result. After a text edit it stays visible with `status` `outdated` until the new revision is organized; the journal `summary` is null meanwhile. `category` is `person`, `place`, `object`, `action`, `emotion` or `theme`; `feeling` is `stated` or `inferred` for an emotion and null otherwise. Every excerpt is a passage of the dream text as written, checked by the backend; items without a matching excerpt are dropped, labels are lower case, and at most 30 tags are kept. `corrected`, `removed` and `summary_corrected` reflect the user's corrections (below). Only the dream text is sent to Gemini, never the title, mood or notes, and the daily `text` limit counts each attempt.
+
+## Correcting the summary and tags
+
+`PUT /v1/dreams/{id}/corrections` changes what the current organization says, without changing the dream:
+
+```json
+{"category": "person", "original_text": "teacher", "text": "my aunt"}
+{"category": "summary", "text": "My own summary."}
+```
+
+`category` is `summary` or a tag category; a tag correction names the tag by its `original_text` (from `organization.tags`). `text` is the new wording, normalized like a tag (trimmed, lower case, single spaces); an empty `text` removes the tag, and sending the tag's original text, or the generated summary, takes the correction back. A rename to the present text of another tag of the same category removes the tag instead, so no tag appears twice. Repeating a request changes nothing. Success is 200 with `{"dream":{…}}`. 409 `invalid_state` without a current organization (none yet, or outdated after a text edit), 400 for an unknown category, a missing `original_text` or one that matches no tag, or an empty summary, 413 over 60 characters for a tag or 600 for a summary.
+
+Corrections are kept apart from the generated rows, so a retry or a new organization never overwrites them, and they are dropped with the organization when the dream's text changes. Each change raises the organization's revision, marks analyses that were given the description as outdated, and, for a tag, removes the tag from its pattern group (its texts are rewritten at the next refresh) and indexes and matches the dream again from the corrected text. A summary correction schedules no new work.
+
+## Analysis
+
+After `organize` ends (completed, or failed for any reason but a limit), the worker runs `analyze` once per revision. `GET /v1/dreams/{id}/analysis` returns `{"analysis": {…} or null, "task": {…} or null}`; `task` is the work the analysis waits for (transcript, summary or analysis of the present revision), otherwise the newest `analyze` task.
+
+```json
+{"id": "c2d4…", "status": "current", "dream_revision": 2,
+ "sections": [{"kind": "waking_life_connections", "text": "The deadline may echo the rush.", "citations": ["DREAM", "M1"]}],
+ "withheld": 0, "removed_sources": 0, "dream_date": "2026-10-15", "mood": "anxious", "model": "gemini-3.1-flash-lite", "instruction_version": "analyze-1", "created_at": 1760371200000,
+ "context": [{"label": "DREAM", "kind": "dream", "source_id": "9f1e…", "source_revision": 2, "source_date": "2026-10-15", "available": true, "cut_to": null},
+             {"label": "M1", "kind": "memory", "source_id": "77aa…", "source_revision": 1, "source_date": "2026-10-13", "available": true, "cut_to": null}]}
+```
+
+Section kinds, in stored order: `what_happened` and `reflection_questions` (always), `emotional_movement`, `waking_life_connections` (only with a life note), `themes_and_readings`, `threat_and_response`, `related_dreams` (only with an earlier dream). Every citation was checked against the supplied labels; sections that failed even after one repair call are left out and counted in `withheld`. Context: `DREAM`, `DESC` (summary and tags), up to 4 life notes (`M1`…) chosen by shared terms and date windows, and up to 3 earlier dreams (`D1`…) that share at least two terms; none of the notes or earlier dreams when the history switch in Settings is off, or when a note's or dream's own switch excludes it. The title is never sent. `available` is false once a source has changed; a source excluded now has no entry and is counted in `removed_sources`, as is a deleted one.
+
+`status` becomes `outdated` when the dream's text, mood or date changes or a source changes. Excluding a note (its "Allow future AI context" off) or an earlier dream (its `history` switch off) removes the sections that cite it; deleting it removes every section. The user then refreshes: `POST /v1/dreams/{id}/analysis/refresh` with `{"refresh_id": "<new UUID>"}` answers 202 with the scheduled `task`, or 200 with work already on its way or the task of a repeated `refresh_id`; 403 `not_permitted` when the dream's `analysis` switch is off, 409 when it has no text, 429 at the daily limit.
+
+## Patterns
+
+Pattern discovery runs by itself: after organization, `index_dream` embeds the dream and its tags (inferred emotions excluded), `match_patterns` asks Gemini whether each new tag joins a candidate group, starts one with a similar ungrouped tag of another dream, or stays alone, and `refresh_findings` writes each group's label, description and explanation. Candidates come only from the same user, from identical tags and from tags within cosine distance 0.40 (sqlite-vector); distance never creates a membership, the model must name a specific shared element. Every number is counted by the backend.
+
+`GET /v1/patterns` (optional `from_date` and `to_date`, both or neither; default the last 30 days in the user's time zone):
+
+```json
+{"available": true, "period": {"from_date": "2026-09-16", "to_date": "2026-10-15"}, "eligible_dreams": 5, "previous_eligible_dreams": 0,
+ "findings": [{"group_id": "1a2b…", "label": "Missed transit", "label_corrected": false, "kind": "recurring", "status": "current",
+               "explanation": "…3 recorded dreams…", "supporting_dreams": 3, "period_count": 3, "previous_count": 0, "trend": null,
+               "examples": [{"dream_id": "9f1e…", "dream_date": "2026-10-13", "title": null, "category": "action", "description": "missing the bus",
+                             "excerpt": "The bus kept leaving", "shared_element": "a vehicle departing just before arrival", "difference": null}],
+               "notes": [], "dismissal_notes": []}],
+ "insufficient_history": false, "task": {…}}
+```
+
+`kind` is `recurring` from 3 supporting dreams, `related` from 2; smaller groups are not shown, and `insufficient_history` is true without findings. `supporting_dreams` counts distinct dreams; `period_count` of `eligible_dreams` (dreams with text whose `patterns` and `analysis` switches are on, dated in the period) and the previous period of equal length give `trend` (`more_often_recorded_recently`, `less_often_recorded_recently`, `same`, or null). `status` is `refreshing`, with `explanation` null, while the evidence differs from what the explanation was written for; opening the screen then schedules one refresh unless that evidence was already tried or the newest refresh failed. `available` is false when the server's vector extension did not load: stored findings still show, nothing new is matched.
+
+All three actions return the patterns response. `PUT …/label` with `{"label": "…"}` sets the user's own label (null or empty removes it; at most 60 characters); it is never sent to the AI. `POST …/dismiss` with `{"dream_id": "…", "note": "…"}` removes the dream from the group for good: it is never matched back into that group, nor grouped again with the group's other dreams; repeating it changes only the note, and an empty note removes it. 409 when the dream does not support the group. `POST …/split` with `{"dream_ids": […], "label": "…", "note": "…"}` moves those dreams into a new group and keeps both sides apart from then on; 409 unless every listed dream supports the group and one remains, so a repeat answers 409. Notes are at most 300 characters (413) and are sent with the group to later matching while the dream they name is not excluded. Editing a member dream, turning its `patterns` or `analysis` switch off, or deleting it removes the AI-written texts of its groups at once; deleting it also empties the notes of splits it took part in.
 
 ## Device settings and deletion
 

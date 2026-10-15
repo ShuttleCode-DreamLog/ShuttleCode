@@ -2,6 +2,7 @@ import msgspec
 from starlette.responses import Response
 import config
 import db
+import records
 from dreams import check_date, paging
 from photos import memory_photos
 from web import RequestError, check_id, json_response, read_body, resolve_user
@@ -85,6 +86,10 @@ async def save_memory(request):
             timestamp = config.now()
             await connection.execute('''INSERT INTO memories(id,user_id,text,recorded_at,event_date,event_precision,is_ongoing,allow_analysis,revision,updated_at)
                 VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET text=excluded.text,event_date=excluded.event_date,event_precision=excluded.event_precision,is_ongoing=excluded.is_ongoing,allow_analysis=excluded.allow_analysis,revision=excluded.revision,updated_at=excluded.updated_at WHERE memories.user_id=excluded.user_id''', (memory_id, identity, body.text, stored['recorded_at'] if stored else timestamp, event_date, precision, int(ongoing), int(allowed), stored['revision'] + int(changed) if stored else 1, timestamp))
+        if stored and changed and conflict is None:
+            await records.source_changed(connection, 'memory', memory_id)
+        if stored and stored['allow_analysis'] and not allowed:
+            await records.source_removed(connection, 'memory', memory_id, False)
         result = await owned_memory(identity, memory_id)
         # AI integration point: invalidate dependent analysis when note content/permission changes.
         # Future provider calls belong in the worker, never in this transaction.
@@ -101,5 +106,6 @@ async def delete_memory(request):
     memory_id = check_id(request.path_params['memory_id'])
     async with db.tx() as connection:
         await owned_memory(identity, memory_id)
+        await records.source_removed(connection, 'memory', memory_id, True)
         await connection.execute('DELETE FROM memories WHERE id=? AND user_id=?', (memory_id, identity))
     return Response(status_code=204)
