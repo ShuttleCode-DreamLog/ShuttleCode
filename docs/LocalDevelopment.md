@@ -22,6 +22,8 @@ security add-generic-password -U -a "$USER" -s dreamlog-gemini-api-key -w
 
 Remove it with `security delete-generic-password -s dreamlog-gemini-api-key`. An exported `GEMINI_API_KEY` in the shell takes precedence over the Keychain. The provider checks in the wiki still apply before real dreams are sent.
 
+The backend also requires `TEXT_MODEL`; the script defaults it to `gemini-3.1-flash-lite`, and an exported value takes precedence. Every new text revision of a dream then schedules one `organize` call to Gemini for its summary and tags. Without a working key or with an exhausted prepaid balance the call fails as `provider_config`: the task waits, retries after 60 and 300 seconds, and starts again at the next server start, without affecting saving or reading.
+
 Keep this terminal running. Running the app from Xcode does not start the backend; Notes cannot save while this server is stopped. Wait for `Listening at: https://0.0.0.0:8443` before trying Save. In a second terminal:
 
 ```sh

@@ -1,6 +1,6 @@
 # Collaborator entry point
 
-This build supplies read/write foundations for all three tabs: text Journal, life Notes and Settings/profile. The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. It currently makes no AI calls.
+This build supplies read/write foundations for all three tabs: text Journal, life Notes and Settings/profile. The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. The backend's task worker calls Gemini for one kind of work so far: the summary and tags of a saved dream (`organize`).
 
 ```mermaid
 flowchart LR
@@ -15,10 +15,11 @@ flowchart LR
 
 | Feature | Screen and state | API / backend | Storage |
 | --- | --- | --- | --- |
-| Journal | `JournalView`, `JournalModel`, `DreamEditor`, `DreamModel` | `/v1/dreams`, `dreams.py` | `dreams`; unsent drafts in phone SQLite |
+| Journal | `JournalView`, `JournalModel`, `DreamEditor`, `DreamModel` | `/v1/dreams`, `dreams.py` (routes and the `organize` handler), `providers.py` (Gemini text adapter) | `dreams`, `outputs`, `tags`; unsent drafts in phone SQLite |
 | Notes | `NotesView`, `NoteEditorView`, `NotesModel`, `NoteEditorModel` | `/v1/memories`, `memories.py`, `photos.py` | `memories`, `memory_photos`; unsent editor state in memory |
 | Profile | `ProfileSettings`, `ProfileModel` | `/v1/me/profile`, `profiles.py` | `profiles.fields_json` |
 | Settings and deletion | `Settings`, `AppModel` | `/v1/me`, `records.py` | `users`; delete cascades profiles, notes and journals |
+| AI tasks | `TaskInfo` in `JournalModels.swift` | `/v1/tasks/{id}/retry`, `tasks.py` (worker), `records.py` (`charge`), `providers.py` | `tasks`, `usage` |
 | Shared infrastructure | `Identity`, `APIClient`, `PrivacyNotice`, `LocalStore` | `main.py`, `web.py`, `db.py`, `config.py` | Device-only Keychain, database schema |
 
 All Swift files above are in `ios/DreamLog/`; backend files are in `backend/`. Routes are listed in `backend/main.py`. Read [API.md](API.md) for callable contracts and [LocalDevelopment.md](LocalDevelopment.md) to run them.

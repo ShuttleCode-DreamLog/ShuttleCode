@@ -13,6 +13,7 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | Life notes | `GET /v1/memories`, `GET /v1/memories/{id}` | `PUT /v1/memories/{id}` | `DELETE /v1/memories/{id}` |
 | Note photos | `GET /v1/memories/{id}/photos/{photo_id}` | `PUT /v1/memories/{id}/photos/{photo_id}` | `DELETE /v1/memories/{id}/photos/{photo_id}` |
 | Profile | `GET /v1/me/profile` | `PUT /v1/me/profile` | Remove keys or send empty `fields`; whole-user deletion also clears it |
+| AI tasks | In `dream.tasks` and journal `status` | `POST /v1/tasks/{id}/retry` | Deleted with their dream or the whole journal |
 
 Lists return `{"items":[…],"has_more":false}`. Pass `limit` (1–200, default 50) and `offset` (default 0). Journal order is date descending, creation time descending, ID ascending; Notes order is recording time descending, ID ascending. Notes additionally accepts `ongoing=true` or `ongoing=false`.
 
@@ -33,11 +34,11 @@ Create with `base_revision: 0`; edit with the last returned revision:
 
 Text and dream_date are required. Dates use real `YYYY-MM-DD` calendar dates. Source is required on creation and immutable afterwards. Optional title/mood: omission preserves, null clears; blank title becomes null. Mood values: calm, happy, excited, confused, sad, anxious, afraid, angry. Optional creation permissions: transcription, analysis, discussion, history, patterns and visuals, all booleans defaulting true. Stored permissions are preserved by this route; change them with the permissions route below.
 
-Success: 201 on creation, 200 on update/repeat, `{"dream":{…}}`. The object contains `id`, `text`, `revision`, `dream_date`, `title`, `mood`, `source`, `audio_status`, `audio_ms`, `heard_text`, `permissions`, `tasks`, `organization`, `created_at`, `updated_at`. This build returns empty tasks and null organization; no AI task is scheduled. Text limit: 20,000 characters; title: 120. Text must not be whitespace only. Text changes increase revision; metadata changes do not. A different text with a stale revision gets 409 `revision_conflict`.
+Success: 201 on creation, 200 on update/repeat, `{"dream":{…}}`. The object contains `id`, `text`, `revision`, `dream_date`, `title`, `mood`, `source`, `audio_status`, `audio_ms`, `heard_text`, `permissions`, `tasks`, `organization`, `created_at`, `updated_at`. `tasks` and `organization` are described under AI tasks and Summary and tags below. Text limit: 20,000 characters; title: 120. Text must not be whitespace only. Text changes increase revision; metadata changes do not. A different text with a stale revision gets 409 `revision_conflict`.
 
-Search: `POST /v1/dreams/search` with `{"query":"lake"}`. Optional mood, from_date, to_date and tag filters can be combined. This is literal case-insensitive SQLite title/text matching (non-ASCII case folding is limited); `%` and `_` are literal characters. Search text is sent in the body, not the URL. Tag filtering is reserved for later organization data. Unsent local drafts are not server search results.
+Search: `POST /v1/dreams/search` with `{"query":"lake"}`. Optional mood, from_date, to_date and tag filters can be combined. This is literal case-insensitive SQLite title/text matching (non-ASCII case folding is limited); `%` and `_` are literal characters. Search text is sent in the body, not the URL. `tag` matches a dream's current tags after normalization (trimmed, lower case, single spaces), including the user's corrections. Unsent local drafts are not server search results.
 
-Journal list items contain id, dream_date, title, mood, revision, audio_status, preview, summary, status, favorite_visual_id and updated_at. Summary/favorite are null in this build.
+Journal list items contain id, dream_date, title, mood, revision, audio_status, preview, summary, status, favorite_visual_id and updated_at. `summary` is the current organization's summary, or null; `favorite_visual_id` is null in this build.
 
 ## Dream permissions
 
@@ -98,6 +99,38 @@ Read: `{"profile":{"fields":{},"revision":0,"updated_at":null}}` before any save
 Success: 200 with the same profile envelope. This replaces the complete fields dictionary. Omitted keys and blank values are removed; `fields:{}` clears all values. Changes increment revision; a stale changed dictionary gets 409, while an identical retry is unchanged. Profiles are independent of `/v1/me` updates.
 
 All values are strings of at most 200 characters. Keys follow `[a-z][a-z0-9_]{0,39}`; at most 30 keys. Values are trimmed. Age, when present, is a whole number string from 0 through 150. Extra ordinary keys need no database change. Profile fields are not AI inputs.
+
+## AI tasks
+
+AI work runs in the backend's task worker, never inside a request. One type is scheduled so far: `organize`, for each new text revision of a text dream whose `analysis` switch is on, and again when that switch is turned on. Other types start with their handlers; the shapes below are final.
+
+Task object, as it appears in `dream.tasks`:
+
+```json
+{"id": "5b0c…", "type": "organize", "status": "failed", "error_code": "network", "dream_id": "9f1e…", "subject_id": null, "source_revision": 2, "updated_at": 1760371200000}
+```
+
+`type` is one of `transcribe`, `organize`, `analyze`, `index_dream`, `match_patterns`, `refresh_findings`, `generate_image`, `generate_video`; `status` is `waiting`, `running`, `completed`, `failed`, `canceled` or `obsolete`. `error_code` is set when `failed`, or `waiting` after a failed attempt; it names a category, never content. `dream.tasks` holds, for the dream's present revision, the newest task of each type (a `transcribe` task always counts; generation tasks are left out), so it is `[]` until work exists.
+
+Journal items' `status` is `attention` when the newest `transcribe`, `organize` or `analyze` task of the present revision failed (a `provider_refused` organization or analysis leaves no mark), otherwise `processing` while one is `waiting` or `running`, otherwise `ready`.
+
+There is no push and no list of tasks: the app reads them with the record, when a screen opens, the app returns to the foreground, or the user pulls to refresh.
+
+`POST /v1/tasks/{id}/retry`, no body: 200 with `{"task":{…}}`. A `failed` task returns to `waiting` with its attempts reset; a `waiting` or `running` one is returned unchanged, so repeating the request is harmless. `completed`, `canceled` or `obsolete` get 409 `invalid_state`; another user's or a missing task 404. While the daily limit for the task's kind of work is used up, a retry gets 429 with `cap_reached` (this user) or `ceiling_reached` (all users); the limits reset at 00:00 UTC and `GET /v1/me` shows today's `usage`.
+
+The worker claims at most three attempts per task, waiting 15 s and 60 s between them, or 60 s and 300 s after `rate_limited` and `provider_config`; then the task is `failed` until the user retries it. A server restart resumes interrupted work, and tasks that failed with `provider_config` (a key or model fault) start again.
+
+## Summary and tags
+
+When `organize` completes, `dream.organization` holds the result for the revision it was made from:
+
+```json
+{"status": "current", "dream_revision": 2, "summary": "A night walk by a blue lake.", "summary_corrected": false,
+ "tags": [{"category": "place", "text": "blue lake", "original_text": "blue lake", "excerpt": "by the Blue Lake", "feeling": null, "corrected": false, "removed": false}],
+ "created_at": 1760371200000}
+```
+
+It is `null` until the first result. After a text edit it stays visible with `status` `outdated` until the new revision is organized; the journal `summary` is null meanwhile. `category` is `person`, `place`, `object`, `action`, `emotion` or `theme`; `feeling` is `stated` or `inferred` for an emotion and null otherwise. Every excerpt is a passage of the dream text as written, checked by the backend; items without a matching excerpt are dropped, labels are lower case, and at most 30 tags are kept. `corrected`, `removed` and `summary_corrected` reflect the user's corrections; the corrections route itself is not built yet. Only the dream text is sent to Gemini, never the title, mood or notes, and the daily `text` limit counts each attempt.
 
 ## Device settings and deletion
 

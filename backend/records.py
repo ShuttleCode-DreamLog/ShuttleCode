@@ -1,11 +1,71 @@
 from datetime import datetime, timezone
+from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import msgspec
 from starlette.responses import Response
 import db
 import config
+import tasks
 from web import RequestError, json_response, read_body, resolve_user
+
+
+async def save_output(connection, identity, dream_id, output_type, dream_revision, content, model, instruction_version):
+    # A generation is a new record with a new ID, not an upsert: the old output's tags and corrections must go with it (wiki 4.3.4).
+    for row in await connection.execute_fetchall("SELECT id FROM outputs WHERE dream_id=? AND type=?", (dream_id, output_type)):
+        await connection.execute("UPDATE outputs SET status='outdated' WHERE id=?", (row["id"],))
+        await source_changed(connection, "output", row["id"])
+    output_id = str(uuid4())
+    await connection.execute("INSERT INTO outputs(id,user_id,dream_id,type,dream_revision,content,model,instruction_version,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (output_id, identity, dream_id, output_type, dream_revision, msgspec.json.encode(content).decode(), model, instruction_version, config.now()))
+    await connection.execute("DELETE FROM outputs WHERE dream_id=? AND type=? AND id<>?", (dream_id, output_type, output_id))
+    return output_id
+
+
+async def source_changed(connection, kind, source_id):
+    await connection.execute("UPDATE outputs SET status='outdated' WHERE id IN (SELECT output_id FROM sources WHERE kind=? AND source_id=? AND output_id IS NOT NULL)", (kind, source_id))
+    # AI integration point: from the discussion increment, also mark stale every discussion whose ok reply has such a sources row.
+
+
+async def dream_text_changed(connection, dream_id):
+    await connection.execute("UPDATE outputs SET status='outdated' WHERE dream_id=?", (dream_id,))
+    await source_changed(connection, "dream", dream_id)
+    # AI integration point: discussion staleness, pattern groups and visual versions join here in their increments (wiki 4.3.5).
+
+
+async def schedule_processing(connection, dream_id):
+    rows = await connection.execute_fetchall("SELECT * FROM dreams WHERE id=?", (dream_id,))
+    if not rows:
+        return
+    dream = rows[0]
+    # Organizing waits while recorded audio may still become the text, so a voice dream is organized once (wiki 4.3.6, rule 2).
+    pending = dream["audio_status"] in ("expected", "uploaded") and dream["allow_transcription"] and not await connection.execute_fetchall("SELECT 1 FROM tasks WHERE dream_id=? AND type='transcribe' AND status='failed' AND error_code NOT IN ('cap_reached','ceiling_reached')", (dream_id,))
+    if dream["text"] and not pending and dream["allow_analysis"]:
+        await tasks.schedule(connection, "organize", f"organize:{dream_id}:{dream['revision']}", dream["user_id"], dream_id, None, dream["revision"])
+    # AI integration point: rules 1, 3 and 4 (transcribe, analyze, index_dream) are added with their handlers (wiki 4.1, rule 6).
+
+
+def utc_day():
+    return datetime.fromtimestamp(config.now() / 1000, timezone.utc).date().isoformat()
+
+
+async def limit_reached(connection, identity, kind, day):
+    counts = {r["user_id"]: r["count"] for r in await connection.execute_fetchall("SELECT user_id,count FROM usage WHERE user_id IN (?,'all') AND day=? AND kind=?", (identity, day, kind))}
+    return "cap_reached" if counts.get(identity, 0) >= config.CAPS[kind] else "ceiling_reached" if counts.get("all", 0) >= config.CEILINGS[kind] else None
+
+
+async def is_cap_reached(identity, kind):
+    return await limit_reached(db.rwdb, identity, kind, utc_day())
+
+
+async def charge(identity, kind):
+    day = utc_day()
+    async with db.tx() as connection:
+        reached = await limit_reached(connection, identity, kind, day)
+        if reached is None:
+            # A charge that arrives just after the journal was deleted must not recreate the user's counter.
+            await connection.execute("INSERT INTO usage(user_id,day,kind,count) SELECT ?,?,?,1 WHERE EXISTS(SELECT 1 FROM users WHERE id=?) ON CONFLICT(user_id,day,kind) DO UPDATE SET count=count+1", (identity, day, kind, identity))
+            await connection.execute("INSERT INTO usage(user_id,day,kind,count) VALUES('all',?,?,1) ON CONFLICT(user_id,day,kind) DO UPDATE SET count=count+1", (day, kind))
+    return reached
 
 
 async def me_value(identity):
@@ -13,7 +73,7 @@ async def me_value(identity):
     if not rows:
         raise RequestError(404, "not_found", "Journal no longer exists.")
     row = rows[0]
-    day = datetime.fromtimestamp(config.now() / 1000, timezone.utc).date().isoformat()
+    day = utc_day()
     usage = {r["kind"]: r["count"] for r in await db.rwdb.execute_fetchall("SELECT kind,count FROM usage WHERE user_id=? AND day=?", (identity, day))}
     return {"user_id": identity, "timezone": row["timezone"], "reminder_weekday": row["reminder_weekday"], "use_history": bool(row["use_history"]), "limits": config.LIMITS, "usage": [{"kind": kind, "used": usage.get(kind, 0), "cap": cap} for kind, cap in config.CAPS.items()], "checkin_keep_days": config.CHECKIN_KEEP_DAYS}
 

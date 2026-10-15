@@ -16,7 +16,7 @@ async def test_create_read_repeat_edit_and_delete(client):
     first = await client.put(path, headers=headers, json=entry(title='Lake'))
     assert first.status_code == 201
     assert first.json()['dream']['revision'] == 1
-    assert first.json()['dream']['tasks'] == []
+    assert [(task['type'], task['status'], task['source_revision']) for task in first.json()['dream']['tasks']] == [('organize', 'waiting', 1)]
     repeat = await client.put(path, headers=headers, json=entry(title='Lake'))
     assert repeat.status_code == 200 and repeat.json() == first.json()
     read = await client.get(path, headers=headers)
