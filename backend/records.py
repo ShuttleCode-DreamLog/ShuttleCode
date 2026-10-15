@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -10,13 +11,14 @@ import tasks
 from web import RequestError, json_response, read_body, resolve_user
 
 
-async def save_output(connection, identity, dream_id, output_type, dream_revision, content, model, instruction_version):
+async def save_output(connection, identity, dream_id, output_type, dream_revision, content, model, instruction_version, sources=()):
     # A generation is a new record with a new ID, not an upsert: the old output's tags and corrections must go with it (wiki 4.3.4).
     for row in await connection.execute_fetchall("SELECT id FROM outputs WHERE dream_id=? AND type=?", (dream_id, output_type)):
         await connection.execute("UPDATE outputs SET status='outdated' WHERE id=?", (row["id"],))
         await source_changed(connection, "output", row["id"])
     output_id = str(uuid4())
     await connection.execute("INSERT INTO outputs(id,user_id,dream_id,type,dream_revision,content,model,instruction_version,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (output_id, identity, dream_id, output_type, dream_revision, msgspec.json.encode(content).decode(), model, instruction_version, config.now()))
+    await connection.executemany("INSERT INTO sources(id,user_id,output_id,label,kind,source_id,source_revision,source_date,cut_to) VALUES(?,?,?,?,?,?,?,?,?)", [(str(uuid4()), identity, output_id, *source) for source in sources])
     await connection.execute("DELETE FROM outputs WHERE dream_id=? AND type=? AND id<>?", (dream_id, output_type, output_id))
     return output_id
 
@@ -26,22 +28,62 @@ async def source_changed(connection, kind, source_id):
     # AI integration point: from the discussion increment, also mark stale every discussion whose ok reply has such a sources row.
 
 
+async def source_removed(connection, kind, source_id, deleted):
+    # An exclusion removes only the sections resting on the source and keeps its rows, so a later deletion still finds every record (wiki 4.3.5).
+    for row in await connection.execute_fetchall("SELECT s.output_id,s.label,o.content FROM sources s JOIN outputs o ON o.id=s.output_id WHERE s.kind=? AND s.source_id=?", (kind, source_id)):
+        content = msgspec.json.decode(row["content"])
+        content["sections"] = [] if deleted else [section for section in content.get("sections", []) if row["label"] not in section["citations"]]
+        content["removed_sources"] = content.get("removed_sources", 0) + int(deleted)
+        await connection.execute("UPDATE outputs SET status='outdated',content=? WHERE id=?", (msgspec.json.encode(content).decode(), row["output_id"]))
+    if deleted:
+        await connection.execute("DELETE FROM sources WHERE kind=? AND source_id=?", (kind, source_id))
+    # AI integration point: from the discussion increment, also mark stale or trim the discussions whose replies were given the source.
+
+
 async def dream_text_changed(connection, dream_id):
     await connection.execute("UPDATE outputs SET status='outdated' WHERE dream_id=?", (dream_id,))
     await source_changed(connection, "dream", dream_id)
-    # AI integration point: discussion staleness, pattern groups and visual versions join here in their increments (wiki 4.3.5).
+    # A foundation module imports a component module only inside the calling function (wiki 4.1.1, rule 4).
+    import patterns
+    await patterns.clear_dream_groups(connection, dream_id)
+    owner = await connection.execute_fetchall("SELECT user_id FROM dreams WHERE id=?", (dream_id,))
+    if owner:
+        await patterns.schedule_refresh(connection, owner[0]["user_id"])
+    # AI integration point: discussion staleness and visual versions join here in their increments (wiki 4.3.5).
 
 
-async def schedule_processing(connection, dream_id):
+async def description_revision(connection, dream):
+    # The organization made for the present revision, or 0: a tag or summary correction raises it and so makes indexing new work (wiki 4.3.3, note 3).
+    rows = await connection.execute_fetchall("SELECT revision FROM outputs WHERE dream_id=? AND type='organization' AND dream_revision=?", (dream["id"], dream["revision"]))
+    return rows[0]["revision"] if rows else 0
+
+
+def index_version():
+    return f"{os.environ.get('EMBEDDING_MODEL', '')}:{config.EMBEDDING_DIMENSIONS}"
+
+
+async def schedule_processing(connection, dream_id, run_after=None):
     rows = await connection.execute_fetchall("SELECT * FROM dreams WHERE id=?", (dream_id,))
     if not rows:
         return
     dream = rows[0]
     # Organizing waits while recorded audio may still become the text, so a voice dream is organized once (wiki 4.3.6, rule 2).
     pending = dream["audio_status"] in ("expected", "uploaded") and dream["allow_transcription"] and not await connection.execute_fetchall("SELECT 1 FROM tasks WHERE dream_id=? AND type='transcribe' AND status='failed' AND error_code NOT IN ('cap_reached','ceiling_reached')", (dream_id,))
-    if dream["text"] and not pending and dream["allow_analysis"]:
+    ready = bool(dream["text"]) and not pending
+    # Organization of this revision has ended when its output exists or its task failed for a reason other than a limit.
+    ended = await connection.execute_fetchall("SELECT 1 FROM outputs WHERE dream_id=? AND type='organization' AND dream_revision=? UNION ALL SELECT 1 FROM tasks WHERE request_key=? AND status='failed' AND error_code NOT IN ('cap_reached','ceiling_reached')", (dream_id, dream["revision"], f"organize:{dream_id}:{dream['revision']}"))
+    if ready and dream["allow_analysis"]:
         await tasks.schedule(connection, "organize", f"organize:{dream_id}:{dream['revision']}", dream["user_id"], dream_id, None, dream["revision"])
-    # AI integration point: rules 1, 3 and 4 (transcribe, analyze, index_dream) are added with their handlers (wiki 4.1, rule 6).
+        # Analysis waits until organization of this revision has ended, so it can use the summary and tags; a limit holds both back (rule 3).
+        if ended:
+            await tasks.schedule(connection, "analyze", f"analyze:{dream_id}:{dream['revision']}:initial", dream["user_id"], dream_id, None, dream["revision"])
+    # Indexing follows organization, or starts at once when analysis is off and organization will not run (rule 4).
+    if ready and dream["allow_patterns"] and (ended or not dream["allow_analysis"]):
+        state = f"{dream_id}:{dream['revision']}:{await description_revision(connection, dream)}"
+        await tasks.schedule(connection, "index_dream", f"index_dream:{state}:{index_version()}", dream["user_id"], dream_id, None, dream["revision"], run_after)
+        if dream["allow_analysis"] and await connection.execute_fetchall("SELECT 1 FROM tasks WHERE request_key=? AND status='completed'", (f"index_dream:{state}:{index_version()}",)):
+            await tasks.schedule(connection, "match_patterns", f"match_patterns:{state}", dream["user_id"], dream_id, None, dream["revision"])
+    # AI integration point: rule 1 (transcribe) is added with voice capture (wiki 4.1, rule 6).
 
 
 def utc_day():

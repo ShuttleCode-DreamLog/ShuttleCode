@@ -27,6 +27,12 @@ def clock(monkeypatch):
     return now
 
 
+@pytest.fixture(autouse=True)
+def organize_only(monkeypatch):
+    # These tests drive organize alone; the analyze task it schedules is covered in test_analysis.py.
+    monkeypatch.setattr(tasks, 'handlers', {'organize': dreams.organize})
+
+
 @pytest.fixture
 def gemini(monkeypatch):
     stand_in = SimpleNamespace(calls=[], answers=[])
@@ -84,7 +90,7 @@ async def test_saving_schedules_organize_once_per_text_revision(client, clock):
     await client.put(f'/v1/dreams/{later}/permissions', headers=other_headers, json={'visuals': True})
     assert await organize_tasks(later) == []
     turned_on = (await client.put(f'/v1/dreams/{later}/permissions', headers=other_headers, json={'analysis': True})).json()['dream']
-    assert [(t['type'], t['status']) for t in turned_on['tasks']] == [('organize', 'waiting')]
+    assert sorted((t['type'], t['status']) for t in turned_on['tasks']) == [('index_dream', 'waiting'), ('organize', 'waiting')]
 
 
 async def test_organize_saves_checked_summary_and_tags(client, clock, gemini, caplog):
@@ -114,7 +120,8 @@ async def test_organize_saves_checked_summary_and_tags(client, clock, gemini, ca
     assert {key: organization[key] for key in ('status', 'dream_revision', 'summary', 'summary_corrected', 'created_at')} == {'status': 'current', 'dream_revision': 1, 'summary': SUMMARY, 'summary_corrected': False, 'created_at': clock['ms']}
     assert organization['tags'][0] == {'category': 'place', 'text': 'blue lake', 'original_text': 'blue lake', 'excerpt': 'the “Blue  Lake”', 'feeling': None, 'corrected': False, 'removed': False}
     item_row = (await client.get('/v1/dreams', headers=headers)).json()['items'][0]
-    assert (item_row['summary'], item_row['status']) == (SUMMARY, 'ready')
+    assert (item_row['summary'], item_row['status']) == (SUMMARY, 'processing')
+    assert [(t['request_key'], t['status']) for t in await db.rwdb.execute_fetchall("SELECT request_key,status FROM tasks WHERE dream_id=? AND type='analyze'", (dream_id,))] == [(f'analyze:{dream_id}:1:initial', 'waiting')]
     assert [i['id'] for i in (await client.post('/v1/dreams/search', headers=headers, json={'tag': ' Blue  LAKE '})).json()['items']] == [dream_id]
     assert (await client.post('/v1/dreams/search', headers=headers, json={'tag': 'bell'})).json()['items'] == []
     assert 'organize kept=4 dropped=6' in caplog.text
@@ -244,7 +251,8 @@ async def test_failures_show_on_the_dream_and_retry_recovers(client, clock, gemi
     assert await tasks.run_once()
     task = (await dream(client, headers, dream_id))['tasks'][0]
     assert (task['status'], task['error_code']) == ('failed', 'provider_refused')
-    assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['status'] == 'ready'
+    assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['status'] == 'processing'
+    assert [t['status'] for t in (await dream(client, headers, dream_id))['tasks'] if t['type'] == 'analyze'] == ['waiting']
     assert (await client.post(f"/v1/tasks/{task['id']}/retry", headers=headers)).json()['task']['status'] == 'waiting'
     assert await tasks.run_once()
     assert (await dream(client, headers, dream_id))['organization']['summary'] == SUMMARY

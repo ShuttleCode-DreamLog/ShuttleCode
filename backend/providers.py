@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import os
 import secrets
 
@@ -9,6 +10,7 @@ import config
 
 logger = logging.getLogger("dreamlog")
 TEXT_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent"
 client = None
 
 
@@ -61,3 +63,27 @@ async def complete_json(instruction, content, schema, name, answer_type, tempera
         return msgspec.json.decode(text, type=answer_type)
     except (msgspec.DecodeError, TypeError):
         raise ProviderError("invalid_output", True) from None
+
+
+async def embed(texts, timeout=None):
+    model, vectors = os.environ["EMBEDDING_MODEL"], []
+    try:
+        # One limit stands around the whole list, so a slow service holds the single worker no longer than one ordinary call (wiki 4.3.10).
+        async with asyncio.timeout(timeout or config.PROVIDER_TIMEOUT_SECONDS):
+            for text in texts:
+                response = await client.post(EMBED_URL.format(model=model), json={"content": {"parts": [{"text": text}]}, "output_dimensionality": config.EMBEDDING_DIMENSIONS}, headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]})
+                if response.status_code >= 400:
+                    raise failure(response.status_code, response.text, model)
+                try:
+                    values = [float(value) for value in response.json()["embedding"]["values"]]
+                except (ValueError, KeyError, TypeError):
+                    raise ProviderError("invalid_output", True) from None
+                length = math.sqrt(sum(value * value for value in values))
+                if len(values) != config.EMBEDDING_DIMENSIONS or not length:
+                    raise ProviderError("invalid_output", True)
+                # The older embedding model does not scale a reduced vector to length 1 itself, so it is always done here.
+                vectors.append([value / length for value in values])
+    except (TimeoutError, httpx.TransportError):
+        raise ProviderError("network", True) from None
+    logger.info("model=%s embeddings=%d", model, len(vectors))
+    return vectors

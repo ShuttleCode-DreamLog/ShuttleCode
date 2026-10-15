@@ -1,4 +1,6 @@
 import asyncio
+import importlib.resources
+import logging
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -8,6 +10,8 @@ import config
 
 rwdb = None
 lock = None
+# Pattern and search parts read this; the rest of the app works without vectors (wiki 4.8.3).
+vectors = False
 
 
 async def finish(statement):
@@ -39,6 +43,24 @@ async def tx():
             raise
 
 
+def vector_path():
+    return importlib.resources.files("sqlite_vector.binaries") / "vector"
+
+
+async def load_vectors():
+    global vectors
+    try:
+        await rwdb.enable_load_extension(True)
+        await rwdb.load_extension(str(vector_path()))
+        await rwdb.enable_load_extension(False)
+        for table in ("dream_vectors", "occurrences"):
+            await rwdb.execute_fetchall(f"SELECT vector_init('{table}', 'embedding', 'type=FLOAT32,dimension={config.EMBEDDING_DIMENSIONS},distance=COSINE')")
+        vectors = True
+    except (sqlite3.Error, AttributeError, OSError) as error:
+        vectors = False
+        logging.getLogger("dreamlog").error("vectors_unavailable error=%s", type(error).__name__)
+
+
 async def open_database(path):
     global rwdb, lock
     lock = asyncio.Lock()
@@ -54,6 +76,7 @@ async def open_database(path):
         # Additive upgrades preserve journals, profiles and notes from earlier versions.
         schema = Path(__file__).with_name("schema.sql").read_text()
         await rwdb.executescript(f"BEGIN IMMEDIATE;\n{schema}\nPRAGMA user_version={config.SCHEMA_VERSION};\nCOMMIT;")
+        await load_vectors()
         return rwdb
     except BaseException:
         await rwdb.close()

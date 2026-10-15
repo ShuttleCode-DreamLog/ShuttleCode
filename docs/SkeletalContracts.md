@@ -11,11 +11,11 @@ This page is the agreement between the backend and the iOS app for the Skeletal 
 | Sync queued dreams when the connection returns | Existing `PUT /v1/dreams/{id}`: client-chosen ID, `base_revision`, a repeated save returns the stored dream | Server implemented; the app's automatic resend is missing |
 | Filter the journal by date or tag | `POST /v1/dreams/search` with `from_date`, `to_date`, `tag` | Server implemented, including tags from `organize`; the app has text search only |
 | Generate an AI summary and tags | `dream.organization`, `dream.tasks`, journal item `summary` and `status`, task retry | Server implemented: `organize` runs on each new text revision and fills `organization` and `summary`; the app's display is missing |
-| Automatic dream analysis with its sources | `GET /v1/dreams/{id}/analysis`, `POST /v1/dreams/{id}/analysis/refresh` | Planned |
-| Include life notes in a dream's analysis | `memory` entries in `analysis.context` | Planned, with analysis |
+| Automatic dream analysis with its sources | `GET /v1/dreams/{id}/analysis`, `POST /v1/dreams/{id}/analysis/refresh` | Server implemented: `analyze` runs after organization; the app's display is missing |
+| Include life notes in a dream's analysis | `memory` entries in `analysis.context` | Server implemented; the app's display is missing |
 | Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Server implemented for both; the app's dream switches are missing |
-| Recurring patterns with counts and evidence | `GET /v1/patterns` | Planned |
-| Rename, dismiss, split a pattern | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Planned |
+| Recurring patterns with counts and evidence | `GET /v1/patterns` | Server implemented; the app's patterns screen is missing |
+| Rename, dismiss, split a pattern | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Server implemented; the app's actions are missing |
 
 ## Working agreement
 
@@ -104,9 +104,13 @@ Implemented on the server; see [API.md](API.md#dream-permissions). The app still
 
 ## Summary and tag corrections (wiki 4.5.3)
 
+Implemented on the server at the user's request on 15 October 2026, although the story map has no card for it; see [API.md](API.md#correcting-the-summary-and-tags). The app still needs the correction actions on a dream's summary and tags.
+
 `PUT /v1/dreams/{dream_id}/corrections` with `category` (`summary` or a tag category), `original_text` (for a tag), `text` (empty removes a tag; must not be empty for `summary`): 200 with `dream`. 409 `invalid_state` without a current organization, 400 when `original_text` matches no tag. Sending a tag's original text restores it. The story map has no card of its own for this; see open questions.
 
 ## Analysis (wiki 4.6.5)
+
+Implemented on the server; see [API.md](API.md#analysis). The app still needs the analysis screen, the Context used list, refresh and retry.
 
 `GET /v1/dreams/{dream_id}/analysis`: 200 with `analysis` (object or null) and `task` (the task the analysis waits for, else the newest `analyze` task of the present revision, else null).
 
@@ -137,6 +141,8 @@ Implemented on the server; see [API.md](API.md#dream-permissions). The app still
 Swift types (wiki 4.6.7): `Analysis`, `AnalysisSection`, `SectionKind`, `ContextEntry`, `SourceKind`, `AnalysisResponse { analysis: Analysis?, task: TaskInfo? }`. Life notes appear as `memory` entries; a note whose `allow_analysis` is off is never supplied and drops out of older analyses at read time.
 
 ## Patterns (wiki 4.8.7)
+
+Implemented on the server; see [API.md](API.md#patterns). The app still needs the patterns screen and the three actions.
 
 All four routes return the patterns response and accept optional `from_date` and `to_date` (both or neither; the default period is the last 30 days in the user's time zone).
 
@@ -179,5 +185,5 @@ Swift types (wiki 4.8.10): `PatternsResponse`, `Period`, `Finding`, `FindingExam
 ## Open questions for the team
 
 - Pattern discovery was designed as a stretch goal (wiki Arc C) and is now Skeletal. Agree where the patterns screen sits in the app before the routes are built.
-- Summary and tag corrections are part of the wiki's organization increment but have no story map card. Decide whether they are Skeletal.
+- Summary and tag corrections have no story map card; the server route exists, and the team decides when the app offers it.
 - The wiki places patterns after organization and analysis, because they are built from checked tags and embeddings. Plan the patterns screen last even though it is Skeletal.

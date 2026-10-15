@@ -21,4 +21,5 @@ export PORT="${PORT:-8443}"
 export GEMINI_API_KEY="${GEMINI_API_KEY:-$(security find-generic-password -s dreamlog-gemini-api-key -w 2>/dev/null || echo foundation-local-no-ai)}"
 # The model is a deployment fact (wiki 4.3.1); this default passed the free-tier trial calls of 15 October 2026.
 export TEXT_MODEL="${TEXT_MODEL:-gemini-3.1-flash-lite}"
+export EMBEDDING_MODEL="${EMBEDDING_MODEL:-gemini-embedding-001}"
 exec uv run --locked python dreamlogd.py

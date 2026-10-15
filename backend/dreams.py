@@ -8,6 +8,7 @@ import msgspec
 from starlette.responses import Response
 import config
 import db
+import patterns
 import providers
 import records
 import tasks
@@ -44,6 +45,12 @@ class PermissionsChange(msgspec.Struct):
     history: bool | msgspec.UnsetType = msgspec.UNSET
     patterns: bool | msgspec.UnsetType = msgspec.UNSET
     visuals: bool | msgspec.UnsetType = msgspec.UNSET
+
+
+class Correction(msgspec.Struct):
+    category: str
+    text: str
+    original_text: str | None = None
 
 
 class JournalFilter(msgspec.Struct):
@@ -152,6 +159,11 @@ async def save_dream(request):
                 WHERE dreams.user_id=excluded.user_id''', (dream_id, identity, body.text, revision, body.dream_date, title, mood, source, stored['audio_status'] if stored else 'expected' if source == 'voice' else 'none', *values, stored['created_at'] if stored else timestamp, timestamp))
             if text_changed:
                 await records.dream_text_changed(connection, dream_id)
+            if stored is not None and (mood != stored['mood'] or body.dream_date != stored['dream_date']):
+                # The analysis was given the mood and the date; other dreams' analyses were given this date (wiki 4.5.4).
+                await connection.execute("UPDATE outputs SET status='outdated' WHERE dream_id=? AND type='analysis'", (dream_id,))
+                if body.dream_date != stored['dream_date']:
+                    await records.source_changed(connection, 'dream', dream_id)
             if stored is None or text_changed:
                 await records.schedule_processing(connection, dream_id)
         result = await owned_dream(identity, dream_id)
@@ -172,9 +184,70 @@ async def save_permissions(request):
         if changes:
             # Column names come solely from PERMISSIONS; the text revision stays, so open editors keep saving.
             await connection.execute(f"UPDATE dreams SET {','.join(f'{column}=?' for column in changes)},updated_at=? WHERE id=? AND user_id=?", (*changes.values(), config.now(), dream_id, identity))
-            # AI integration point: apply the remaining wiki 4.3.6 effects here, in this transaction: source_removed when allow_history turns off,
-            # and transcript cleanup when allow_transcription turns off.
-            if 1 in changes.values():
+            # AI integration point: transcript cleanup when allow_transcription turns off joins here with voice capture (wiki 4.3.6).
+            if changes.get('allow_history') == 0:
+                await records.source_removed(connection, 'dream', dream_id, False)
+            if changes.get('allow_patterns') == 0 or changes.get('allow_analysis') == 0:
+                await patterns.clear_dream_groups(connection, dream_id)
+                await patterns.schedule_refresh(connection, identity)
+            # Turning analysis off also indexes the dream at once, so search can find it although it will not be organized (wiki 4.3.6).
+            if 1 in changes.values() or changes.get('allow_analysis') == 0:
+                await records.schedule_processing(connection, dream_id)
+        value = await dream_body(await owned_dream(identity, dream_id))
+    tasks.wake.set()
+    return json_response({'dream': value})
+
+
+def normalized(text):
+    return ' '.join(text.lower().split())
+
+
+async def save_correction(request):
+    identity = await resolve_user(request)
+    dream_id = check_id(request.path_params['dream_id'])
+    body = await read_body(request, Correction)
+    summary = body.category == 'summary'
+    if not summary and body.category not in config.TAG_CATEGORIES:
+        raise RequestError(400, 'invalid_request', 'Category must be summary or a tag category.')
+    if not summary and body.original_text is None:
+        raise RequestError(400, 'invalid_request', 'A tag correction names the tag in original_text.')
+    text = body.text.strip() if summary else normalized(body.text)
+    original = '' if summary else normalized(body.original_text)
+    if summary and not text:
+        raise RequestError(400, 'invalid_request', 'A summary cannot be empty.')
+    if len(text) > config.LIMITS['max_summary_chars' if summary else 'max_tag_chars']:
+        raise RequestError(413, 'too_large', 'Summary is too long.' if summary else 'Tag is too long.')
+    async with db.tx() as connection:
+        await owned_dream(identity, dream_id)
+        outputs = await connection.execute_fetchall("SELECT * FROM outputs WHERE dream_id=? AND user_id=? AND type='organization'", (dream_id, identity))
+        if not outputs or outputs[0]['status'] != 'current':
+            raise RequestError(409, 'invalid_state', 'There is no current summary and tags to correct.')
+        output = outputs[0]
+        tag = None if summary else next(iter(await connection.execute_fetchall('SELECT * FROM tags WHERE output_id=? AND category=? AND text=?', (output['id'], body.category, original))), None)
+        if not summary and tag is None:
+            raise RequestError(400, 'invalid_request', 'original_text matches no tag of this dream.')
+        stored = await connection.execute_fetchall('SELECT text FROM org_corrections WHERE output_id=? AND category=? AND original_text=?', (output['id'], body.category, original))
+        generated = msgspec.json.decode(output['content'])['summary'] if summary else original
+        # A tag never appears twice: renaming one to another tag's present text removes it instead (wiki 4.5.3, step 3).
+        duplicate = not summary and text and await connection.execute_fetchall('SELECT 1 FROM effective_tags WHERE output_id=? AND category=? AND text=? AND original_text<>?', (output['id'], body.category, text, original))
+        wanted = '' if duplicate else None if text == generated else text
+        changed = (stored[0]['text'] if stored else None) != wanted
+        if changed:
+            if wanted is None:
+                await connection.execute('DELETE FROM org_corrections WHERE output_id=? AND category=? AND original_text=?', (output['id'], body.category, original))
+            else:
+                await connection.execute('INSERT INTO org_corrections(output_id,category,original_text,text,user_id,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(output_id,category,original_text) DO UPDATE SET text=excluded.text,updated_at=excluded.updated_at',
+                                         (output['id'], body.category, original, wanted, identity, config.now()))
+            # The raised revision is the description revision, so a corrected tag makes new indexing work rather than a repeat (wiki 4.3.3, note 3).
+            await connection.execute('UPDATE outputs SET revision=revision+1 WHERE id=?', (output['id'],))
+            await records.source_changed(connection, 'output', output['id'])
+            if tag is not None:
+                membership = await connection.execute_fetchall('SELECT group_id FROM pattern_memberships WHERE tag_id=?', (tag['id'],))
+                if membership:
+                    # The membership's comparison texts no longer describe the tag; matching decides afresh from the corrected text (wiki 4.5.3, step 6).
+                    await connection.execute('DELETE FROM pattern_memberships WHERE tag_id=?', (tag['id'],))
+                    await patterns.clear_group_texts(connection, membership[0]['group_id'])
+                    await patterns.schedule_refresh(connection, identity)
                 await records.schedule_processing(connection, dream_id)
         value = await dream_body(await owned_dream(identity, dream_id))
     tasks.wake.set()
@@ -235,7 +308,10 @@ async def delete_dream(request):
     dream_id = check_id(request.path_params['dream_id'])
     async with db.tx() as connection:
         await owned_dream(identity, dream_id)
+        await records.source_removed(connection, 'dream', dream_id, True)
+        await patterns.dream_removed(connection, dream_id)
         await connection.execute('DELETE FROM dreams WHERE id=? AND user_id=?', (dream_id, identity))
+        await patterns.schedule_refresh(connection, identity)
     for path in (request.app.state.data_dir / 'audio').glob(f'{dream_id}.*'):
         path.unlink(missing_ok=True)
     return Response(status_code=204)
