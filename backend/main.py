@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import secrets
@@ -11,7 +12,9 @@ from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.routing import Route
+import config
 import db
+import tasks
 from dreams import delete_dream, get_dream, list_dreams, save_dream, save_permissions, search_dreams
 from memories import delete_memory, get_memory, list_memories, save_memory
 from profiles import get_profile, save_profile
@@ -32,13 +35,23 @@ async def lifespan(app):
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
     app.state.data_dir = directory
     app.state.rwdb = await db.open_database(directory / "dreamlog.db")
+    tasks.wake = asyncio.Event()
+    worker = None
     try:
+        await tasks.restart()
         uploaded = {r[0] for r in await db.rwdb.execute_fetchall("SELECT id FROM dreams WHERE audio_status='uploaded'")}
         for path in (directory / "audio").iterdir():
             if path.is_file() and (path.suffix == ".part" or path.name.split('.')[0] not in uploaded):
                 path.unlink()
+        worker = asyncio.create_task(tasks.worker()) if config.START_WORKER else None
         yield
     finally:
+        if worker is not None:
+            worker.cancel()
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
         await db.rwdb.close()
 
 
@@ -58,8 +71,11 @@ class FaultBody(msgspec.Struct):
 
 async def fault(request):
     body = await read_body(request, FaultBody)
+    if body.where == "task":
+        tasks.fault = body.text
+        return json_response({})
     if body.where != "route":
-        raise RequestError(400, "invalid_request", "Only route faults exist in Foundation.")
+        raise RequestError(400, "invalid_request", "A fault is raised in a route or in the next task.")
     raise RuntimeError(body.text)
 
 
@@ -80,6 +96,7 @@ routes.extend([
     Route("/v1/dreams/{dream_id}", save_dream, methods=["PUT"]),
     Route("/v1/dreams/{dream_id}", delete_dream, methods=["DELETE"]),
     Route("/v1/dreams/{dream_id}/permissions", save_permissions, methods=["PUT"]),
+    Route("/v1/tasks/{task_id}/retry", tasks.retry_task, methods=["POST"]),
 ])
 if os.environ.get("DREAMLOG_FAULTS") == "1":
     routes.append(Route("/v1/faults", fault, methods=["POST"]))

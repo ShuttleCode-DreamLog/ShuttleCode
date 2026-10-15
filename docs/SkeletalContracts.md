@@ -10,7 +10,7 @@ This page is the agreement between the backend and the iOS app for the Skeletal 
 | Type and save, browse, reopen, edit, delete a dream | `/v1/dreams`, `/v1/dreams/{id}` | Implemented |
 | Sync queued dreams when the connection returns | Existing `PUT /v1/dreams/{id}`: client-chosen ID, `base_revision`, a repeated save returns the stored dream | Server implemented; the app's automatic resend is missing |
 | Filter the journal by date or tag | `POST /v1/dreams/search` with `from_date`, `to_date`, `tag` | Server implemented; tags exist only after organization; the app has text search only |
-| Generate an AI summary and tags | `dream.organization`, `dream.tasks`, journal item `summary` and `status`, task retry | Placeholders today: `null`, `[]`, `null`, `"ready"` |
+| Generate an AI summary and tags | `dream.organization`, `dream.tasks`, journal item `summary` and `status`, task retry | Task worker, `dream.tasks`, journal `status` and retry implemented; `organization` and `summary` stay `null` until the `organize` handler |
 | Automatic dream analysis with its sources | `GET /v1/dreams/{id}/analysis`, `POST /v1/dreams/{id}/analysis/refresh` | Planned |
 | Include life notes in a dream's analysis | `memory` entries in `analysis.context` | Planned, with analysis |
 | Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Server implemented for both; the app's dream switches are missing |
@@ -39,6 +39,8 @@ The backend returns `invalid_request` 400, `invalid_user` 401, `not_found` 404, 
 Failed AI work is not an HTTP error: it is reported in the task's `error_code`.
 
 ## Task object and retry (wiki 4.3.3)
+
+Implemented on the server; see [API.md](API.md#ai-tasks). The app still needs the target `TaskInfo` below and a retry action.
 
 ```json
 {"id": "5b0c…", "type": "organize", "status": "failed", "error_code": "cap_reached",

@@ -5,6 +5,7 @@ import msgspec
 from starlette.responses import Response
 import config
 import db
+import tasks
 from web import RequestError, check_id, json_response, read_body, resolve_user
 
 MOODS = {'calm', 'happy', 'excited', 'confused', 'sad', 'anxious', 'afraid', 'angry'}
@@ -57,12 +58,16 @@ def check_date(value):
     return value
 
 
-def dream_value(row):
-    return {**{key: row[key] for key in ('id', 'text', 'revision', 'dream_date', 'title', 'mood', 'source', 'audio_status', 'audio_ms', 'heard_text', 'created_at', 'updated_at')}, 'permissions': {key: bool(row[f'allow_{key}']) for key in PERMISSIONS}, 'tasks': [], 'organization': None}
+def dream_value(row, task_values):
+    return {**{key: row[key] for key in ('id', 'text', 'revision', 'dream_date', 'title', 'mood', 'source', 'audio_status', 'audio_ms', 'heard_text', 'created_at', 'updated_at')}, 'permissions': {key: bool(row[f'allow_{key}']) for key in PERMISSIONS}, 'tasks': task_values, 'organization': None}
 
 
-def journal_item(row):
-    return {**{key: row[key] for key in ('id', 'dream_date', 'title', 'mood', 'revision', 'audio_status', 'updated_at')}, 'preview': row['text'][:200], 'summary': None, 'status': 'ready', 'favorite_visual_id': None}
+async def dream_body(row):
+    return dream_value(row, await tasks.dream_tasks(row['user_id'], row['id'], row['revision']))
+
+
+def journal_item(row, status):
+    return {**{key: row[key] for key in ('id', 'dream_date', 'title', 'mood', 'revision', 'audio_status', 'updated_at')}, 'preview': row['text'][:200], 'summary': None, 'status': status, 'favorite_visual_id': None}
 
 
 async def owned_dream(identity, dream_id):
@@ -75,7 +80,7 @@ async def owned_dream(identity, dream_id):
 async def get_dream(request):
     identity = await resolve_user(request)
     dream_id = check_id(request.path_params['dream_id'])
-    return json_response({'dream': dream_value(await owned_dream(identity, dream_id))})
+    return json_response({'dream': await dream_body(await owned_dream(identity, dream_id))})
 
 
 async def save_dream(request):
@@ -119,7 +124,8 @@ async def save_dream(request):
         result = await owned_dream(identity, dream_id)
         # AI integration point: enqueue revision-keyed dream processing here in this transaction.
         # This is where the future worker will call the provider API after commit, with owner/permission checks.
-    return json_response({'dream': dream_value(result)}, 200 if stored else 201)
+        value = await dream_body(result)
+    return json_response({'dream': value}, 200 if stored else 201)
 
 
 async def save_permissions(request):
@@ -134,8 +140,8 @@ async def save_permissions(request):
             await connection.execute(f"UPDATE dreams SET {','.join(f'{column}=?' for column in changes)},updated_at=? WHERE id=? AND user_id=?", (*changes.values(), config.now(), dream_id, identity))
             # AI integration point: apply the wiki 4.3.6 effects here, in this transaction: source_removed when allow_history turns off,
             # transcript cleanup when allow_transcription turns off, and schedule_processing when a switch turns on.
-        result = await owned_dream(identity, dream_id)
-    return json_response({'dream': dream_value(result)})
+        value = await dream_body(await owned_dream(identity, dream_id))
+    return json_response({'dream': value})
 
 
 def paging(request):
@@ -174,7 +180,8 @@ async def page(request, identity, filters):
         clauses.append("EXISTS(SELECT 1 FROM effective_tags t WHERE t.dream_id=d.id AND t.user_id=d.user_id AND t.text=? AND t.output_status='current')")
         values.append(' '.join(filters.tag.lower().split()))
     rows = await db.rwdb.execute_fetchall(f"SELECT d.* FROM dreams d WHERE {' AND '.join(clauses)} ORDER BY d.dream_date DESC,d.created_at DESC,d.id ASC LIMIT ? OFFSET ?", (*values, limit + 1, offset))
-    return json_response({'items': [journal_item(row) for row in rows[:limit]], 'has_more': len(rows) > limit})
+    statuses = await tasks.journal_statuses(identity, rows[:limit])
+    return json_response({'items': [journal_item(row, statuses[row['id']]) for row in rows[:limit]], 'has_more': len(rows) > limit})
 
 
 async def list_dreams(request):

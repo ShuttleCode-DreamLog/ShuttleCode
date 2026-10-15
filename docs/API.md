@@ -13,6 +13,7 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | Life notes | `GET /v1/memories`, `GET /v1/memories/{id}` | `PUT /v1/memories/{id}` | `DELETE /v1/memories/{id}` |
 | Note photos | `GET /v1/memories/{id}/photos/{photo_id}` | `PUT /v1/memories/{id}/photos/{photo_id}` | `DELETE /v1/memories/{id}/photos/{photo_id}` |
 | Profile | `GET /v1/me/profile` | `PUT /v1/me/profile` | Remove keys or send empty `fields`; whole-user deletion also clears it |
+| AI tasks | In `dream.tasks` and journal `status` | `POST /v1/tasks/{id}/retry` | Deleted with their dream or the whole journal |
 
 Lists return `{"items":[…],"has_more":false}`. Pass `limit` (1–200, default 50) and `offset` (default 0). Journal order is date descending, creation time descending, ID ascending; Notes order is recording time descending, ID ascending. Notes additionally accepts `ongoing=true` or `ongoing=false`.
 
@@ -98,6 +99,26 @@ Read: `{"profile":{"fields":{},"revision":0,"updated_at":null}}` before any save
 Success: 200 with the same profile envelope. This replaces the complete fields dictionary. Omitted keys and blank values are removed; `fields:{}` clears all values. Changes increment revision; a stale changed dictionary gets 409, while an identical retry is unchanged. Profiles are independent of `/v1/me` updates.
 
 All values are strings of at most 200 characters. Keys follow `[a-z][a-z0-9_]{0,39}`; at most 30 keys. Values are trimmed. Age, when present, is a whole number string from 0 through 150. Extra ordinary keys need no database change. Profile fields are not AI inputs.
+
+## AI tasks
+
+AI work runs in the backend's task worker, never inside a request. No task type is scheduled yet: each type starts with its handler, beginning with `organize` for the summary and tags. The shapes below are final, so the app can decode them now.
+
+Task object, as it appears in `dream.tasks`:
+
+```json
+{"id": "5b0c…", "type": "organize", "status": "failed", "error_code": "network", "dream_id": "9f1e…", "subject_id": null, "source_revision": 2, "updated_at": 1760371200000}
+```
+
+`type` is one of `transcribe`, `organize`, `analyze`, `index_dream`, `match_patterns`, `refresh_findings`, `generate_image`, `generate_video`; `status` is `waiting`, `running`, `completed`, `failed`, `canceled` or `obsolete`. `error_code` is set when `failed`, or `waiting` after a failed attempt; it names a category, never content. `dream.tasks` holds, for the dream's present revision, the newest task of each type (a `transcribe` task always counts; generation tasks are left out), so it is `[]` until work exists.
+
+Journal items' `status` is `attention` when the newest `transcribe`, `organize` or `analyze` task of the present revision failed (a `provider_refused` organization or analysis leaves no mark), otherwise `processing` while one is `waiting` or `running`, otherwise `ready`.
+
+There is no push and no list of tasks: the app reads them with the record, when a screen opens, the app returns to the foreground, or the user pulls to refresh.
+
+`POST /v1/tasks/{id}/retry`, no body: 200 with `{"task":{…}}`. A `failed` task returns to `waiting` with its attempts reset; a `waiting` or `running` one is returned unchanged, so repeating the request is harmless. `completed`, `canceled` or `obsolete` get 409 `invalid_state`; another user's or a missing task 404. While the daily limit for the task's kind of work is used up, a retry gets 429 with `cap_reached` (this user) or `ceiling_reached` (all users); the limits reset at 00:00 UTC and `GET /v1/me` shows today's `usage`.
+
+The worker claims at most three attempts per task, waiting 15 s and 60 s between them, or 60 s and 300 s after `rate_limited` and `provider_config`; then the task is `failed` until the user retries it. A server restart resumes interrupted work, and tasks that failed with `provider_config` (a key or model fault) start again.
 
 ## Device settings and deletion
 
