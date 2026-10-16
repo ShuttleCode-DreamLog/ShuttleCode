@@ -9,7 +9,7 @@ func journalDate(_ date: Date = .now) -> String {
     return formatter.string(from: date)
 }
 
-func journalDay(_ value: String) -> Date {
+nonisolated func journalDay(_ value: String) -> Date {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "yyyy-MM-dd"
@@ -39,15 +39,71 @@ nonisolated struct Dream: Codable, Sendable, Identifiable {
     var updatedAt: Date
 }
 
-nonisolated struct TaskInfo: Codable, Sendable {
-    var id: String
-    var type: String
-    var status: String
+nonisolated enum TaskType: String, Codable, Sendable {
+    case transcribe, organize, analyze, indexDream = "index_dream", matchPatterns = "match_patterns", refreshFindings = "refresh_findings", generateImage = "generate_image", generateVideo = "generate_video", unknown
+    init(from decoder: any Decoder) throws { self = TaskType(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
 }
+
+nonisolated enum TaskStatus: String, Codable, Sendable {
+    case waiting, running, completed, failed, canceled, obsolete, unknown
+    init(from decoder: any Decoder) throws { self = TaskStatus(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
+}
+
+nonisolated struct TaskInfo: Codable, Sendable, Identifiable {
+    var id: String
+    var type: TaskType
+    var status: TaskStatus
+    var errorCode: String?
+    var dreamId: String?
+    var subjectId: String?
+    var sourceRevision: Int?
+    var updatedAt: Date
+    var inProgress: Bool { status == .waiting || status == .running }
+    var limited: Bool { status == .failed && (errorCode == "cap_reached" || errorCode == "ceiling_reached") }
+}
+
+nonisolated struct TaskResponse: Decodable { var task: TaskInfo }
+
+nonisolated enum OutputStatus: String, Codable, Sendable {
+    case current, outdated, unknown
+    init(from decoder: any Decoder) throws { self = OutputStatus(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
+}
+
+nonisolated enum TagCategory: String, Codable, Sendable {
+    case person, place, object, action, emotion, theme, unknown
+    init(from decoder: any Decoder) throws { self = TagCategory(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
+}
+
+nonisolated enum Feeling: String, Codable, Sendable {
+    case stated, inferred, unknown
+    init(from decoder: any Decoder) throws { self = Feeling(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
+}
+
+nonisolated struct Tag: Codable, Sendable, Identifiable {
+    var category: TagCategory
+    var text: String
+    var originalText: String
+    var excerpt: String
+    var feeling: Feeling?
+    var corrected: Bool
+    var removed: Bool
+    var id: String { "\(category.rawValue):\(originalText)" }
+}
+
 nonisolated struct Organization: Codable, Sendable {
-    var status: String
+    var status: OutputStatus
     var dreamRevision: Int
     var summary: String
+    var summaryCorrected: Bool
+    var tags: [Tag]
+    var createdAt: Date
+}
+
+nonisolated struct DreamCorrection: Encodable { var category: String; var originalText: String?; var text: String }
+
+nonisolated enum ServerStatus: String, Codable, Sendable {
+    case ready, processing, attention, unknown
+    init(from decoder: any Decoder) throws { self = ServerStatus(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
 }
 
 nonisolated struct JournalItem: Codable, Sendable, Identifiable {
@@ -59,7 +115,7 @@ nonisolated struct JournalItem: Codable, Sendable, Identifiable {
     var audioStatus: String
     var preview: String
     var summary: String?
-    var status: String
+    var status: ServerStatus
     var favoriteVisualId: String?
     var updatedAt: Date
 }
@@ -67,12 +123,13 @@ nonisolated struct JournalItem: Codable, Sendable, Identifiable {
 nonisolated struct JournalPage: Decodable { var items: [JournalItem]; var hasMore: Bool }
 nonisolated struct DreamResponse: Decodable { var dream: Dream }
 
-nonisolated struct JournalFilter: Encodable {
+nonisolated struct JournalFilter: Encodable, Equatable {
     var query = ""
+    var tag: String?
     var mood: Mood?
     var fromDate: String?
     var toDate: String?
-    var isEmpty: Bool { query.isEmpty && mood == nil && fromDate == nil && toDate == nil }
+    var isEmpty: Bool { query.isEmpty && tag == nil && mood == nil && fromDate == nil && toDate == nil }
 }
 
 nonisolated struct Draft: Codable, Sendable {
@@ -125,17 +182,29 @@ nonisolated struct DreamSave: Encodable {
     }
 }
 
+nonisolated enum JournalStatus { case unsentDraft, needsAttention, processing, saved }
+
 nonisolated struct JournalRow: Identifiable {
     var id: String
     var item: JournalItem?
     var draft: Draft?
-    var status: String {
-        if draft?.unsent == true { "Unsent draft" }
-        else if item?.status == "attention" { "Needs attention" }
-        else if item?.status == "processing" { "Processing" }
-        else { "Saved" }
+    var status: JournalStatus {
+        if draft?.unsent == true { .unsentDraft }
+        else if item?.status == .attention { .needsAttention }
+        else if item?.status == .processing { .processing }
+        else { .saved }
     }
-    var title: String { draft?.title ?? item?.title ?? "Untitled journal" }
+    // A row without a loaded server item is a draft and opens in the editor; every loaded dream opens its own screen.
+    var opensEditor: Bool { item == nil }
+    var statusText: String {
+        switch status {
+        case .unsentDraft: draft?.conflict == true ? "Saved on this device · Needs your review" : "Saved on this device · Waiting to sync"
+        case .needsAttention: "Synced · Needs attention"
+        case .processing: "Synced · Summary on its way"
+        case .saved: "Synced"
+        }
+    }
+    var title: String { draft?.title ?? item?.title ?? "Untitled dream" }
     var preview: String { draft?.text ?? item?.summary ?? item?.preview ?? "" }
     var date: String { draft?.dreamDate ?? item?.dreamDate ?? "" }
 }

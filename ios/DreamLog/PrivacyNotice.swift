@@ -1,10 +1,10 @@
 import SwiftUI
 import CryptoKit
 
-let noticeVersion = 3
+let noticeVersion = 4
 let noticeKey = "notice-version"
 let noticeContentKey = "notice-content-fingerprint"
-let noticeIntroduction = "Development build: AI and recording are unavailable. Read how this project handles your data."
+let noticeIntroduction = "Development build: summaries, tags, analyses and patterns are made by an AI service on the server; recording is unavailable. Read how this project handles your data."
 let deletionKey = "deletion-started"
 let reminderKey = "reminder-weekday"
 let answeredOffersKey = "answered-offers"
@@ -16,10 +16,10 @@ struct PrivacyPart: Identifiable {
 }
 
 let privacyParts: [PrivacyPart] = [
-    .init(title: "AI", text: "This build sends nothing to AI. Future features may send dream text, permitted life notes and earlier dreams, discussion messages, or audio for transcription. A new notice is required before they are enabled."),
-    .init(title: "Deletion", text: "Deleting a record removes our stored copy, not data an AI provider may retain under its own policy. Provider retention terms must be confirmed before AI is enabled."),
+    .init(title: "AI", text: "A dream's text, date and mood are sent to Google's Gemini service for a summary, tags, an analysis and comparisons with your other dreams. Life notes and earlier dreams you allow are sent as analysis context, and corrections you type are sent too. The server currently uses a free-tier key, under which Google may use what is sent to improve its services: enter only invented sample dreams."),
+    .init(title: "Deletion", text: "Deleting a record removes our stored copy, not data the AI provider keeps under its own terms."),
     .init(title: "Storage", text: "Journals, notes and profile fields are stored on the project server; its operators can read them."),
-    .init(title: "Permissions", text: "History is in Settings. Dream editors hold per-dream switches; notes have an AI context switch. Microphone permission will be managed in iOS Settings when recording is available."),
+    .init(title: "Permissions", text: "The history switch is in Settings and on Life Notes. Each dream has six AI switches and Keep out of AI processing; each note has Allow AI use. Microphone permission will be managed in iOS Settings when recording is available."),
     .init(title: "Recordings", text: "Recording is unavailable. Planned server audio is deleted after a usable transcript is stored, transcription is turned off, or the dream is deleted. The phone keeps its copy until you see the transcript and its draft is sent, unless you discard/delete it. Failed transcription keeps audio; deleted audio cannot be replayed."),
     .init(title: "Project", text: "Delete my journal removes this device’s entire server journal, local data and identity. The project plan is to delete remaining server journals at course end; the date and cleanup must be confirmed before public release.")
 ]

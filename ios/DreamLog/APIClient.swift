@@ -136,4 +136,39 @@ final class APIClient {
     func deleteNotePhoto(_ memoryID: String, photoID: String) async -> Result<Void, APIError> {
         await response(method: "DELETE", path: "v1/memories/\(memoryID)/photos/\(photoID)", empty: true).map { _ in () }
     }
+    private func send<Body: Encodable, Value: Decodable>(_ method: String, _ path: String, _ value: Body, query: [URLQueryItem] = []) async -> Result<Value, APIError> {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        guard let body = try? encoder.encode(value) else { return .failure(.decoding) }
+        return decode(await response(method: method, path: path, query: query, body: body))
+    }
+    func savePermissions(_ id: String, _ value: [String: Bool]) async -> Result<Dream, APIError> {
+        let result: Result<DreamResponse, APIError> = await send("PUT", "v1/dreams/\(id)/permissions", value)
+        return result.map(\.dream)
+    }
+    func saveCorrection(_ id: String, _ value: DreamCorrection) async -> Result<Dream, APIError> {
+        let result: Result<DreamResponse, APIError> = await send("PUT", "v1/dreams/\(id)/corrections", value)
+        return result.map(\.dream)
+    }
+    func retryTask(_ id: String) async -> Result<TaskInfo, APIError> {
+        let result: Result<TaskResponse, APIError> = decode(await response(method: "POST", path: "v1/tasks/\(id)/retry"))
+        return result.map(\.task)
+    }
+    func loadAnalysis(_ dreamID: String) async -> Result<AnalysisResponse, APIError> {
+        decode(await response(method: "GET", path: "v1/dreams/\(dreamID)/analysis"))
+    }
+    func refreshAnalysis(_ dreamID: String, refreshID: String) async -> Result<TaskInfo, APIError> {
+        let result: Result<TaskResponse, APIError> = await send("POST", "v1/dreams/\(dreamID)/analysis/refresh", RefreshRequest(refreshId: refreshID))
+        return result.map(\.task)
+    }
+    func loadPatterns() async -> Result<PatternsResponse, APIError> { decode(await response(method: "GET", path: "v1/patterns")) }
+    func labelPattern(_ groupID: String, _ value: PatternLabel) async -> Result<PatternsResponse, APIError> {
+        await send("PUT", "v1/patterns/groups/\(groupID)/label", value)
+    }
+    func dismissPattern(_ groupID: String, _ value: PatternDismissal) async -> Result<PatternsResponse, APIError> {
+        await send("POST", "v1/patterns/groups/\(groupID)/dismiss", value)
+    }
+    func splitPattern(_ groupID: String, _ value: PatternSplit) async -> Result<PatternsResponse, APIError> {
+        await send("POST", "v1/patterns/groups/\(groupID)/split", value)
+    }
 }

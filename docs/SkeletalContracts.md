@@ -8,14 +8,14 @@ This page is the agreement between the backend and the iOS app for the Skeletal 
 | --- | --- | --- |
 | Start the server, set up the journal, open settings | `/v1/me`, `/v1/me/profile` | Implemented |
 | Type and save, browse, reopen, edit, delete a dream | `/v1/dreams`, `/v1/dreams/{id}` | Implemented |
-| Sync queued dreams when the connection returns | Existing `PUT /v1/dreams/{id}`: client-chosen ID, `base_revision`, a repeated save returns the stored dream | Server implemented; the app's automatic resend is missing |
-| Filter the journal by date or tag | `POST /v1/dreams/search` with `from_date`, `to_date`, `tag` | Server implemented, including tags from `organize`; the app has text search only |
-| Generate an AI summary and tags | `dream.organization`, `dream.tasks`, journal item `summary` and `status`, task retry | Server implemented: `organize` runs on each new text revision and fills `organization` and `summary`; the app's display is missing |
-| Automatic dream analysis with its sources | `GET /v1/dreams/{id}/analysis`, `POST /v1/dreams/{id}/analysis/refresh` | Server implemented: `analyze` runs after organization; the app's display is missing |
-| Include life notes in a dream's analysis | `memory` entries in `analysis.context` | Server implemented; the app's display is missing |
-| Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Server implemented for both; the app's dream switches are missing |
-| Recurring patterns with counts and evidence | `GET /v1/patterns` | Server implemented; the app's patterns screen is missing |
-| Rename, dismiss, split a pattern | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Server implemented; the app's actions are missing |
+| Sync queued dreams when the connection returns | Existing `PUT /v1/dreams/{id}`: client-chosen ID, `base_revision`, a repeated save returns the stored dream | Implemented: every journal load, including the one when the connection returns, resends waiting drafts (`JournalModel.sendQueued`) |
+| Filter the journal by date or tag | `POST /v1/dreams/search` with `from_date`, `to_date`, `tag` | Implemented: Journal filter area, and "Show dreams with this tag" on a dream's tags |
+| Generate an AI summary and tags | `dream.organization`, `dream.tasks`, journal item `summary` and `status`, task retry | Implemented: Dream Detail shows the summary, tags, removed tags, task state and retry |
+| Automatic dream analysis with its sources | `GET /v1/dreams/{id}/analysis`, `POST /v1/dreams/{id}/analysis/refresh` | Implemented: Dream Detail shows the sections with their sources, refresh and retry |
+| Include life notes in a dream's analysis | `memory` entries in `analysis.context` | Implemented: "Information used for this analysis" lists and opens the notes; the history switch is also on Life Notes |
+| Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Implemented: "Keep out of AI processing" and the six switches on Dream Detail; "Allow AI use" on notes |
+| Recurring patterns with counts and evidence | `GET /v1/patterns` | Implemented: Patterns tab, List and Garden views |
+| Rename, dismiss, split a pattern | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Implemented: "Correct this pattern" on each finding |
 
 ## Working agreement
 
@@ -40,7 +40,7 @@ Failed AI work is not an HTTP error: it is reported in the task's `error_code`.
 
 ## Task object and retry (wiki 4.3.3)
 
-Implemented on the server; see [API.md](API.md#ai-tasks). The app still needs the target `TaskInfo` below and a retry action.
+Implemented on the server; see [API.md](API.md#ai-tasks). The app has the target `TaskInfo` below and a retry action.
 
 ```json
 {"id": "5b0c…", "type": "organize", "status": "failed", "error_code": "cap_reached",
@@ -63,7 +63,7 @@ Error codes with their own wording in the app (wiki 4.4.6): `cap_reached` and `c
 
 ## Dream object and journal item (wiki 4.5.3)
 
-Implemented on the server; see [API.md](API.md#summary-and-tags). The app still needs the target `Organization` and `Tag` types below.
+Implemented on the server; see [API.md](API.md#summary-and-tags). The app has the target `Organization` and `Tag` types below.
 
 `dream.tasks`: for the dream's present revision, the newest task of each type, without `generate_image` and `generate_video`; `transcribe` always counts. `dream.organization`: null until an organization output exists.
 
@@ -98,19 +98,19 @@ Journal item: `summary` is the effective summary of a current organization, othe
 
 ## Dream permissions (wiki 4.5.3)
 
-Implemented on the server; see [API.md](API.md#dream-permissions). The app still needs the six switches and the "Keep out of AI processing" control.
+Implemented on the server; see [API.md](API.md#dream-permissions). The app has the six switches and the "Keep out of AI processing" control.
 
 `PUT /v1/dreams/{dream_id}/permissions` with any of `transcription`, `analysis`, `discussion`, `history`, `patterns`, `visuals` (booleans, each optional): 200 with `dream`. Only the fields sent change; the revision is not raised. The app's "Keep out of AI processing" control sends all six as false; turning it off sends nothing (wiki 4.5.8). The dream save keeps ignoring `permissions` after the first save.
 
 ## Summary and tag corrections (wiki 4.5.3)
 
-Implemented on the server at the user's request on 15 October 2026, although the story map has no card for it; see [API.md](API.md#correcting-the-summary-and-tags). The app still needs the correction actions on a dream's summary and tags.
+Implemented on the server at the user's request on 15 October 2026, although the story map has no card for it; see [API.md](API.md#correcting-the-summary-and-tags). The app offers Correct summary and, per tag, Rename, Remove and Restore.
 
 `PUT /v1/dreams/{dream_id}/corrections` with `category` (`summary` or a tag category), `original_text` (for a tag), `text` (empty removes a tag; must not be empty for `summary`): 200 with `dream`. 409 `invalid_state` without a current organization, 400 when `original_text` matches no tag. Sending a tag's original text restores it. The story map has no card of its own for this; see open questions.
 
 ## Analysis (wiki 4.6.5)
 
-Implemented on the server; see [API.md](API.md#analysis). The app still needs the analysis screen, the Context used list, refresh and retry.
+Implemented on the server; see [API.md](API.md#analysis). The app shows the analysis, the Context used list, refresh and retry on Dream Detail.
 
 `GET /v1/dreams/{dream_id}/analysis`: 200 with `analysis` (object or null) and `task` (the task the analysis waits for, else the newest `analyze` task of the present revision, else null).
 
@@ -142,7 +142,7 @@ Swift types (wiki 4.6.7): `Analysis`, `AnalysisSection`, `SectionKind`, `Context
 
 ## Patterns (wiki 4.8.7)
 
-Implemented on the server; see [API.md](API.md#patterns). The app still needs the patterns screen and the three actions.
+Implemented on the server; see [API.md](API.md#patterns). The app has the patterns screen and the three actions.
 
 All four routes return the patterns response and accept optional `from_date` and `to_date` (both or neither; the default period is the last 30 days in the user's time zone).
 
@@ -184,6 +184,7 @@ Swift types (wiki 4.8.10): `PatternsResponse`, `Period`, `Finding`, `FindingExam
 
 ## Open questions for the team
 
-- Pattern discovery was designed as a stretch goal (wiki Arc C) and is now Skeletal. Agree where the patterns screen sits in the app before the routes are built.
-- Summary and tag corrections have no story map card; the server route exists, and the team decides when the app offers it.
-- The wiki places patterns after organization and analysis, because they are built from checked tags and embeddings. Plan the patterns screen last even though it is Skeletal.
+- Pattern discovery was designed as a stretch goal (wiki Arc C) and is now Skeletal. The app follows the team's UI/UX exhibit (EGMUIUX, screens S01–S10): Journal, Patterns and Life Notes tabs, with Settings at the top right of each.
+- Summary and tag corrections have no story map card; the app offers them on Dream Detail (15 October 2026). The team may still drop them.
+- EGMUIUX draws Hide Pattern with a Dismissed view and Restore. The backend's dismissal (wiki 4.8.7) removes one dream from a group for good and has no restore, so the app offers "Not part of this pattern" per dream, shows dismissal notes with Remove note, and has no Dismissed view. Its Garden has no one-dream seedlings, because the server returns only groups of two or more dreams.
+- The automatic resend of queued dreams follows story map card R2 over the wiki's rule that a draft leaves the phone only on the user's tap (4.4.4, rule 2).

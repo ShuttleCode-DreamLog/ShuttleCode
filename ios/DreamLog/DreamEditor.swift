@@ -8,10 +8,13 @@ struct DreamEditorView: View {
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
     let newEntry: Bool
+    let presented: Bool
 
-    init(id: String, newEntry: Bool = false) {
-        _model = State(initialValue: DreamModel(id: id, newEntry: newEntry))
+    // `presented` is the editor opened over a dream's screen: it starts editing and always offers Done.
+    init(id: String, newEntry: Bool = false, presented: Bool = false) {
+        _model = State(initialValue: DreamModel(id: id, newEntry: newEntry, editing: presented))
         self.newEntry = newEntry
+        self.presented = presented
     }
     var body: some View {
         Form {
@@ -64,19 +67,22 @@ struct DreamEditorView: View {
                     }
                     Section("Journal text") { Text(dream.text).textSelection(.enabled) }
                 }
-                Section {
-                    Button(draft.baseRevision == 0 && !draft.unconfirmed && model.dream == nil ? "Discard draft" : "Delete journal entry", role: .destructive) { confirmingDelete = true }
+                // Over a dream's screen, Delete Dream stays on that screen (EGMUIUX S03).
+                if !presented {
+                    Section {
+                        Button(draft.baseRevision == 0 && !draft.unconfirmed && model.dream == nil ? "Discard draft" : "Delete journal entry", role: .destructive) { confirmingDelete = true }
+                    }
                 }
             } else if !model.isLoading {
                 Button("Try again") { Task { await model.load(app) } }
             }
         }
         .disabled(model.isSending)
-        .navigationTitle(model.draft?.title?.isEmpty == false ? model.draft!.title! : newEntry ? "New journal" : "Journal entry")
+        .navigationTitle(model.draft?.title?.isEmpty == false ? model.draft!.title! : newEntry ? "New dream" : "Dream Editor")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(model.isEditing || model.isSending)
         .toolbar {
-            if newEntry || model.isEditing {
+            if newEntry || presented || model.isEditing {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { Task { if await model.close(app) { dismiss() } } }.disabled(model.isSending)
                 }
@@ -94,9 +100,10 @@ struct DreamEditorView: View {
         .confirmationDialog("Revert changes to this journal entry?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
             Button("Revert changes", role: .destructive) { Task { await model.revert(app) } }
         }
-        .interactiveDismissDisabled(model.isSending)
-        .task { await model.load(app) }
-        .onDisappear { Task { await model.close(app) } }
+        // Over a dream's screen only Done closes the editor, so its save finishes before that screen reads the dream again.
+        .interactiveDismissDisabled(presented || model.isSending)
+        .task { app.editing.insert(model.id); await model.load(app) }
+        .onDisappear { Task { await model.close(app); app.editing.remove(model.id) } }
         .onChange(of: scenePhase) { _, phase in if phase != .active { Task { await model.close(app) } } }
     }
 }

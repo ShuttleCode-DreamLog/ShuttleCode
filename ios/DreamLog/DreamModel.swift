@@ -17,7 +17,7 @@ final class DreamModel {
     private var epoch: Int?
     private var writing: Task<Result<Void, StoreError>, Never>?
 
-    init(id: String, newEntry: Bool = false) { self.id = id; self.newEntry = newEntry; isEditing = newEntry }
+    init(id: String, newEntry: Bool = false, editing: Bool = false) { self.id = id; self.newEntry = newEntry; isEditing = newEntry || editing }
     private func current(_ app: AppModel) -> Bool { epoch == app.journalEpoch && !app.deleting && app.noticeSeen }
     private func persist(_ value: Draft, app: AppModel) async -> Bool {
         guard current(app) else { return false }
@@ -199,6 +199,42 @@ final class DreamModel {
         }
         guard case .success = await app.store.deleteDraft(id) else { error = "Could not erase the local draft. Try again."; return }
         deleted = true
+    }
+    // Switches, corrections and retries each return the record; it replaces what is shown (wiki 4.4.6, rule 4).
+    private func apply(_ result: Result<Dream, APIError>, app: AppModel) {
+        guard current(app) else { return }
+        switch result {
+        case let .success(value):
+            dream = value; error = nil
+            if draft?.unsent != true { draft = Draft(dream: value) }
+        case let .failure(failure): error = failure.message
+        }
+    }
+    func savePermissions(_ app: AppModel, _ value: [String: Bool]) async {
+        guard !isSending, current(app), let client = app.client else { return }
+        isSending = true
+        defer { isSending = false }
+        apply(await client.savePermissions(id, value), app: app)
+    }
+    func correct(_ app: AppModel, _ value: DreamCorrection) async {
+        guard !isSending, current(app), let client = app.client else { return }
+        isSending = true
+        defer { isSending = false }
+        apply(await client.saveCorrection(id, value), app: app)
+    }
+    func retry(_ app: AppModel, task: TaskInfo) async {
+        guard !isSending, current(app), let client = app.client else { return }
+        isSending = true
+        defer { isSending = false }
+        let result = await client.retryTask(task.id)
+        guard current(app) else { return }
+        switch result {
+        case let .success(value):
+            let tasks = dream?.tasks.map { $0.id == value.id ? value : $0 }
+            if let tasks { dream?.tasks = tasks }
+            error = nil
+        case let .failure(failure): error = failure.message
+        }
     }
     @discardableResult func close(_ app: AppModel) async -> Bool {
         guard !deleted, !isSending, await flush(), current(app), let draft else { return deleted }

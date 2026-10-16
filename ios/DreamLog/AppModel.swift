@@ -1,6 +1,9 @@
 import Foundation
+import Network
 import Observation
 import UserNotifications
+
+nonisolated enum AppTab: Hashable { case journal, patterns, notes }
 
 @MainActor @Observable
 final class AppModel {
@@ -15,6 +18,13 @@ final class AppModel {
     var savingSettings = false
     var streamInProgress = false
     var recording = false
+    var tab = AppTab.journal
+    // Raised when the app returns to the foreground or the connection returns; open screens run load() on it (wiki 4.4.6).
+    var refreshes = 0
+    // Set by "Show dreams with this tag" on a dream's screen; the journal takes it over as its filter.
+    var requestedTag: String?
+    // Dreams open in an editor; the queued-dream resend leaves their drafts to that editor.
+    var editing: Set<String> = []
     var isBusy: Bool { recording || streamInProgress || savingSettings }
     var canCancelDeletion: Bool { !cleanupStarted }
     var settingsAvailable: Bool { me != nil && !loading && !savingSettings && !deleting }
@@ -69,6 +79,17 @@ final class AppModel {
         ready = true
         loading = false
         if noticeSeen { await load() }
+    }
+    func showJournal(tag: String) {
+        requestedTag = tag
+        tab = .journal
+    }
+    func watchConnection() async {
+        var offline = false
+        for await path in NWPathMonitor() {
+            if path.status == .satisfied && offline { refreshes += 1 }
+            offline = path.status != .satisfied
+        }
     }
     private func refreshNotice() {
         hasPriorAcknowledgment = defaults.object(forKey: noticeKey) != nil

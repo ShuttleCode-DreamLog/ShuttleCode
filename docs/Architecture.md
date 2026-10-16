@@ -1,6 +1,6 @@
 # Collaborator entry point
 
-This build supplies read/write foundations for all three tabs: text Journal, life Notes and Settings/profile. The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. The backend's task worker calls Gemini for one kind of work so far: the summary and tags of a saved dream (`organize`).
+The app has three tabs, Journal, Patterns and Life Notes, with Settings at the top right of each, following the team's UI/UX exhibit EGMUIUX (screens S01–S10, colors in `Theme.swift`). The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. The backend's task worker calls Gemini for the summary and tags (`organize`), the analysis (`analyze`) and pattern discovery (`index_dream`, `match_patterns`, `refresh_findings`).
 
 ```mermaid
 flowchart LR
@@ -15,13 +15,14 @@ flowchart LR
 
 | Feature | Screen and state | API / backend | Storage |
 | --- | --- | --- | --- |
-| Journal | `JournalView`, `JournalModel`, `DreamEditor`, `DreamModel` | `/v1/dreams`, `dreams.py` (routes and the `organize` handler), `providers.py` (Gemini text adapter) | `dreams`, `outputs`, `tags`; unsent drafts in phone SQLite |
-| Analysis | (planned: analysis screen) | `/v1/dreams/{id}/analysis`, `/analysis/refresh`, `analysis.py` (context selection and the `analyze` handler) | `outputs` (type `analysis`), `sources` |
-| Patterns | (planned: patterns screen) | `/v1/patterns`, `/v1/patterns/groups/{id}/label`, `/dismiss`, `/split`, `patterns.py` (indexing, matching, findings), `providers.embed` | `dream_vectors`, `occurrences`, `pattern_*` tables (sqlite-vector) |
+| Journal | `JournalView` (search, date and tag filters), `JournalModel` (with the queued-draft resend), `DreamEditor`, `DreamModel` | `/v1/dreams`, `/v1/dreams/search`, `dreams.py` (routes and the `organize` handler), `providers.py` (Gemini text adapter) | `dreams`, `outputs`, `tags`; unsent drafts in phone SQLite |
+| Dream Detail | `DreamDetail.swift`: `DreamDetailView` (switches, summary and tags with corrections, analysis, context used, delete), `AnalysisModel` | `/v1/dreams/{id}/permissions`, `/corrections`, `/analysis` | as Journal and Analysis |
+| Analysis | `AnalysisModel`, `Analysis` types in `AIModels.swift` | `/v1/dreams/{id}/analysis`, `/analysis/refresh`, `analysis.py` (context selection and the `analyze` handler) | `outputs` (type `analysis`), `sources` |
+| Patterns | `PatternsView` (List and Garden), `FindingSection` (rename, split, dismiss), `PatternsModel` | `/v1/patterns`, `/v1/patterns/groups/{id}/label`, `/dismiss`, `/split`, `patterns.py` (indexing, matching, findings), `providers.embed` | `dream_vectors`, `occurrences`, `pattern_*` tables (sqlite-vector) |
 | Notes | `NotesView`, `NoteEditorView`, `NotesModel`, `NoteEditorModel` | `/v1/memories`, `memories.py`, `photos.py` | `memories`, `memory_photos`; unsent editor state in memory |
 | Profile | `ProfileSettings`, `ProfileModel` | `/v1/me/profile`, `profiles.py` | `profiles.fields_json` |
-| Settings and deletion | `Settings`, `AppModel` | `/v1/me`, `records.py` | `users`; delete cascades profiles, notes and journals |
-| AI tasks | `TaskInfo` in `JournalModels.swift` | `/v1/tasks/{id}/retry`, `tasks.py` (worker), `records.py` (`charge`), `providers.py` | `tasks`, `usage` |
+| Settings and deletion | `Settings` (sheet from `SettingsButton`), `AppModel` (tab, `refreshes` on foreground or reconnection) | `/v1/me`, `records.py` | `users`; delete cascades profiles, notes and journals |
+| AI tasks | `TaskInfo` in `JournalModels.swift`, `failureText` (wiki 4.4.6 wording) in `AIModels.swift` | `/v1/tasks/{id}/retry`, `tasks.py` (worker), `records.py` (`charge`), `providers.py` | `tasks`, `usage` |
 | Shared infrastructure | `Identity`, `APIClient`, `PrivacyNotice`, `LocalStore` | `main.py`, `web.py`, `db.py`, `config.py` | Device-only Keychain, database schema |
 
 All Swift files above are in `ios/DreamLog/`; backend files are in `backend/`. Routes are listed in `backend/main.py`. Read [API.md](API.md) for callable contracts and [LocalDevelopment.md](LocalDevelopment.md) to run them.
@@ -46,6 +47,6 @@ This is the user's requested CRUD foundation, not a full Increment 5/AI pipeline
 
 Journal now commits automatically on leaving the editor and offers Revert instead of Save. Notes also supports photo attachments. [EditorAndPhotos.md](EditorAndPhotos.md) records the interaction rules, storage choice, callable photo API and explicit `AI integration point` comments in the code.
 
-Story map v2 (revised 11 October 2026) places recurring patterns with rename, dismiss and split in its Skeletal tier, ahead of the wiki's Arc C stretch placement. Schema version 5 therefore already holds every wiki §4.8.2 table (`dream_vectors`, `occurrences`, `pattern_groups`, `pattern_memberships`, `pattern_corrections`, `pattern_separations`) and the `current_occurrences` view. `dream_vectors` is included because `index_dream`, the first pattern task, writes it together with `occurrences`. No route, task handler or vector extension writes them yet. The contracts the remaining Skeletal cards need are in [SkeletalContracts.md](SkeletalContracts.md).
+Story map v2 (revised 11 October 2026) places recurring patterns with rename, dismiss and split in its Skeletal tier, ahead of the wiki's Arc C stretch placement. Schema version 5 therefore already holds every wiki §4.8.2 table (`dream_vectors`, `occurrences`, `pattern_groups`, `pattern_memberships`, `pattern_corrections`, `pattern_separations`) and the `current_occurrences` view. `dream_vectors` is included because `index_dream`, the first pattern task, writes it together with `occurrences`. The contracts the remaining Skeletal cards need are in [SkeletalContracts.md](SkeletalContracts.md).
 
 Short privacy copy is provisional development content. Detailed provider, recording and project-end policies must be restored before those features or a release. Voice, analysis, discussion and media remain future work. The backend is deployed on the course server at `https://34.66.84.214` ([ProductionTransition.md](ProductionTransition.md)); no App Store submission is claimed.

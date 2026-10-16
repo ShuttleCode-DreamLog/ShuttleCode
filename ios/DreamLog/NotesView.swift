@@ -9,18 +9,28 @@ struct NotesView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                Section {
+                    Button { creating = EntryRoute(id: newID()) } label: { Label("Add Note", systemImage: "plus").frame(maxWidth: .infinity) }
+                        .buttonStyle(.borderedProminent).controlSize(.large)
+                        .accessibilityIdentifier("addNote")
+                        .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                }
+                Section {
+                    HistoryToggle()
+                } footer: { Text("The same switch as in Settings: it also covers earlier dreams. A note is used only when this and the note's own Allow AI use are both on.") }
                 if let error = model.error {
                     Section { Text(error).foregroundStyle(.red); Button("Try again") { Task { await model.load(app) } } }
                 }
                 if model.items.isEmpty && !model.isLoading {
-                    ContentUnavailableView("No life notes", systemImage: "note.text", description: Text("Tap + to record an event or thought from your waking life."))
+                    ContentUnavailableView("No life notes", systemImage: "note.text", description: Text("Tap Add Note to record an event or thought from your waking life."))
                 }
                 ForEach(model.items) { note in
                     NavigationLink(value: note.id) {
                         VStack(alignment: .leading, spacing: 6) {
+                            Text(note.eventDate.map(displayDate) ?? note.recordedAt.formatted(date: .abbreviated, time: .omitted)).font(.subheadline.weight(.semibold))
                             Text(note.text.isEmpty ? "Photo note" : note.text).lineLimit(3)
                             HStack {
-                                Text(note.eventDate ?? note.recordedAt.formatted(date: .abbreviated, time: .omitted))
+                                Text("Allow AI use: \(note.allowAnalysis ? "On" : "Off")")
                                 if note.isOngoing { Text("Ongoing") }
                                 if !note.photos.isEmpty { Label("\(note.photos.count)", systemImage: "photo") }
                             }.font(.caption).foregroundStyle(.secondary)
@@ -32,8 +42,9 @@ struct NotesView: View {
                 }
                 if model.isLoading { ProgressView() }
             }
-            .navigationTitle("Notes")
-            .toolbar { Button("New life note", systemImage: "plus") { creating = EntryRoute(id: newID()) } }
+            .dreamPage()
+            .navigationTitle("Life Notes")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsButton() } }
             .navigationDestination(for: String.self) { NoteEditorView(id: $0) }
             .sheet(item: $creating, onDismiss: { Task { await model.load(app) } }) { entry in
                 NavigationStack { NoteEditorView(id: entry.id, newEntry: true) }
@@ -41,6 +52,7 @@ struct NotesView: View {
             .task { await model.load(app) }
             .refreshable { await model.load(app) }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await model.load(app) } } }
+            .onChange(of: app.refreshes) { Task { await model.load(app) } }
         }
     }
 }
@@ -88,7 +100,9 @@ struct NoteEditorView: View {
                         }
                     }
                     Toggle("Still going on", isOn: $editor.value.isOngoing)
-                    Toggle("Allow future AI context", isOn: $editor.value.allowAnalysis)
+                    Toggle("Allow AI use", isOn: $editor.value.allowAnalysis)
+                    Text("This switch and “Use life notes and earlier dreams” in Settings must both be on for this note to be sent with a dream's analysis.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if model.conflict {
                     Section("Stored note changed") {
@@ -110,7 +124,7 @@ struct NoteEditorView: View {
                     LabeledContent("Recorded", value: stored.recordedAt.formatted(date: .abbreviated, time: .shortened))
                     if let date = stored.eventDate { LabeledContent("Event date", value: date); LabeledContent("Precision", value: stored.eventPrecision.rawValue) }
                     LabeledContent("Ongoing", value: stored.isOngoing ? "Yes" : "No")
-                    LabeledContent("Future AI context", value: stored.allowAnalysis ? "Allowed" : "Off")
+                    LabeledContent("Allow AI use", value: stored.allowAnalysis ? "On" : "Off")
                 }
             }
             if model.stored != nil { Section { Button("Delete note", role: .destructive) { confirmingDelete = true } } }

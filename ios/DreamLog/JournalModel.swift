@@ -21,6 +21,8 @@ final class JournalModel {
         isLoading = true
         defer { isLoading = false }
         let epoch = app.journalEpoch
+        if !more { await sendQueued(app) }
+        guard epoch == app.journalEpoch, !app.deleting else { return }
         async let local = app.store.drafts()
         let result = await client.loadJournal(filter: filter, offset: more ? items.count : 0)
         let localResult = await local
@@ -37,6 +39,19 @@ final class JournalModel {
         case let .failure(failure):
             if !more { items = [] }
             hasMore = false; error = failure.message
+        }
+    }
+    // Story map v2 Skeletal card "Sync queued dreams when the connection returns": every journal load, including the one after
+    // the connection comes back, sends the drafts that wait for the server through the dream's own save logic, one at a time.
+    private func sendQueued(_ app: AppModel) async {
+        guard case let .success(stored) = await app.store.drafts() else { return }
+        for draft in stored where draft.unsent && !draft.conflict && !app.editing.contains(draft.dreamId) {
+            let dream = DreamModel(id: draft.dreamId)
+            await dream.load(app)
+            guard dream.draft?.unsent == true, dream.canSave(app) else { continue }
+            await dream.save(app)
+            // A draft that is still unsent means the server is out of reach; the others wait for the next load.
+            if dream.draft?.unsent == true { break }
         }
     }
 }

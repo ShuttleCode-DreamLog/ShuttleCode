@@ -74,12 +74,12 @@ extension FoundationTests {
     @Test func journalJoinsDraftAndServerEntryWithoutDuplicates() {
         let model = JournalModel()
         let id = newID()
-        model.items = [JournalItem(id: id, dreamDate: "2026-10-08", revision: 1, audioStatus: "none", preview: "Stored", status: "ready", updatedAt: .now)]
+        model.items = [JournalItem(id: id, dreamDate: "2026-10-08", revision: 1, audioStatus: "none", preview: "Stored", status: .ready, updatedAt: .now)]
         var draft = Draft(dreamId: id, dreamDate: "2026-10-08")
         draft.text = "Kept edit"; draft.baseRevision = 1
         model.drafts = [draft]
         #expect(model.rows.count == 1)
-        #expect(model.rows[0].status == "Unsent draft" && model.rows[0].preview == "Kept edit")
+        #expect(model.rows[0].status == .unsentDraft && model.rows[0].preview == "Kept edit")
     }
 
     @Test func dreamSaveWritesNullsAndOnlySendsPermissionsAtCreation() throws {

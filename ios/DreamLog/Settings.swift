@@ -1,23 +1,42 @@
 import SwiftUI
 
+// Settings sits at the top right of every tab root and opens over it (EGMUIUX S08).
+struct SettingsButton: View {
+    @State private var showing = false
+    var body: some View {
+        Button("Settings") { showing = true }.sheet(isPresented: $showing) { SettingsView() }
+    }
+}
+
+struct HistoryToggle: View {
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        Toggle("Use life notes and earlier dreams", isOn: Binding(get: { model.me?.useHistory ?? true }, set: { value in Task { await model.saveHistory(value) } }))
+            .disabled(!model.settingsAvailable)
+    }
+}
+
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
             List {
-                ProfileSettings()
-                Section("History") {
-                    Toggle("Use life notes and earlier dreams", isOn: Binding(get: { model.me?.useHistory ?? true }, set: { value in Task { await model.saveHistory(value) } }))
-                        .disabled(!model.settingsAvailable)
-                    Text("Permission for future AI features. No AI calls are made in this build.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                Section {
+                    HistoryToggle()
+                } header: { Text("Your journal, your choices") } footer: {
+                    Text("Capture dreams and explore tentative reflections. This switch lets permitted life notes and earlier dreams be sent as context when a dream is analyzed. A dream or note you exclude stays excluded. Changes apply to future analyses and do not rerun earlier ones.")
                 }
+                ProfileSettings()
                 if let error = model.error {
                     Section { Text(error).foregroundStyle(.red); Button("Retry loading settings") { Task { await model.load() } } }
                 }
                 PrivacyText()
                 Section { DeleteJournalButton() }
-            }.navigationTitle("Settings")
+            }
+            .dreamPage()
+            .navigationTitle("Settings")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
 }
