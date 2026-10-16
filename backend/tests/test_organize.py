@@ -277,7 +277,7 @@ def test_excerpt_location_cut_and_tag_checks():
 
 def test_text_model_is_required(monkeypatch, tmp_path):
     monkeypatch.setenv('DATA_DIR', str(tmp_path))
-    monkeypatch.setenv('GEMINI_API_KEY', 'test-placeholder-not-used')
+    monkeypatch.setenv('VERTEX_PROJECT', 'test-project')
     monkeypatch.delenv('TEXT_MODEL', raising=False)
     with pytest.raises(RuntimeError, match='TEXT_MODEL'):
         config.data_directory()
@@ -286,7 +286,8 @@ def test_text_model_is_required(monkeypatch, tmp_path):
 @pytest.fixture
 def endpoint(monkeypatch):
     monkeypatch.setenv('TEXT_MODEL', 'test-text-model')
-    monkeypatch.setenv('GEMINI_API_KEY', 'secret-key-value')
+    monkeypatch.setenv('VERTEX_PROJECT', 'test-project')
+    monkeypatch.setenv('VERTEX_ACCESS_TOKEN', 'secret-key-value')
     seen = []
     def install(handler):
         async def recorded(request):
@@ -313,9 +314,31 @@ async def test_adapter_request_and_success(endpoint, caplog):
     assert (result.summary, result.items[0].category) == (SUMMARY, 'place')
     request = endpoint.seen[0]
     sent = json.loads(request.content)
-    assert (request.method, str(request.url), request.headers['authorization']) == ('POST', providers.TEXT_URL, 'Bearer secret-key-value')
-    assert sent == {'model': 'test-text-model', 'messages': [{'role': 'system', 'content': 'Instruction.'}, {'role': 'user', 'content': 'Content.'}], 'response_format': {'type': 'json_schema', 'json_schema': {'name': 'organization', 'schema': dreams.ORGANIZE_SCHEMA}}, 'temperature': 0}
+    assert (request.method, str(request.url), request.headers['authorization']) == ('POST', 'https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/endpoints/openapi/chat/completions', 'Bearer secret-key-value')
+    assert sent == {'model': 'google/test-text-model', 'messages': [{'role': 'system', 'content': 'Instruction.'}, {'role': 'user', 'content': 'Content.'}], 'response_format': {'type': 'json_schema', 'json_schema': {'name': 'organization', 'schema': dreams.ORGANIZE_SCHEMA}}, 'temperature': 0}
     assert 'model=test-text-model prompt_tokens=12 completion_tokens=34 finish=stop' in caplog.text and 'secret-key-value' not in caplog.text
+
+
+async def test_adapter_takes_the_service_account_token_from_metadata(endpoint, monkeypatch, caplog):
+    monkeypatch.delenv('VERTEX_ACCESS_TOKEN')
+    monkeypatch.setattr(providers, 'credential', ('', 0.0))
+    async def answer(request):
+        if request.url.host == 'metadata.google.internal':
+            assert request.headers['metadata-flavor'] == 'Google'
+            return httpx.Response(200, json={'access_token': 'metadata-token', 'expires_in': 3599, 'token_type': 'Bearer'})
+        return httpx.Response(200, json=completion(json.dumps({'summary': SUMMARY, 'items': [item('place', 'lake', 'Lake')]})))
+    endpoint.install(answer)
+    await call()
+    await call()
+    assert [request.url.host for request in endpoint.seen] == ['metadata.google.internal', 'aiplatform.googleapis.com', 'aiplatform.googleapis.com']
+    assert endpoint.seen[2].headers['authorization'] == 'Bearer metadata-token'
+    monkeypatch.setattr(providers, 'credential', ('', 0.0))
+    async def missing(request):
+        raise httpx.ConnectError('no metadata server')
+    endpoint.install(missing)
+    with pytest.raises(providers.ProviderError) as raised:
+        await call()
+    assert (raised.value.category, raised.value.temporary) == ('provider_config', True) and 'provider_config token=unavailable' in caplog.text
 
 
 @pytest.mark.parametrize(('status', 'body', 'category', 'temporary'), [

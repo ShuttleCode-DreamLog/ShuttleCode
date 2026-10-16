@@ -13,7 +13,7 @@ from main import app, application
 @pytest_asyncio.fixture
 async def client(tmp_path, monkeypatch):
     monkeypatch.setenv('DATA_DIR', str(tmp_path))
-    monkeypatch.setenv('GEMINI_API_KEY', 'test-placeholder-not-used')
+    monkeypatch.setenv('VERTEX_PROJECT', 'test-project')
     monkeypatch.setenv('TEXT_MODEL', 'test-text-model')
     monkeypatch.setenv('EMBEDDING_MODEL', 'test-embedding-model')
     monkeypatch.setattr(config, 'START_WORKER', False)

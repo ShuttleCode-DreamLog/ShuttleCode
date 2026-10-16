@@ -667,7 +667,8 @@ async def test_routes_require_ownership_and_valid_input(client, clock, ai):
 @pytest.fixture
 def endpoint(monkeypatch):
     monkeypatch.setenv('EMBEDDING_MODEL', 'test-embedding-model')
-    monkeypatch.setenv('GEMINI_API_KEY', 'secret-key-value')
+    monkeypatch.setenv('VERTEX_PROJECT', 'test-project')
+    monkeypatch.setenv('VERTEX_ACCESS_TOKEN', 'secret-key-value')
     seen = []
     def install(handler):
         async def recorded(request):
@@ -679,14 +680,14 @@ def endpoint(monkeypatch):
 
 async def test_embed_adapter_request_scaling_and_errors(endpoint, monkeypatch, caplog):
     async def answer(request):
-        return httpx.Response(200, json={'embedding': {'values': [3.0, 4.0] + [0.0] * 766}})
+        return httpx.Response(200, json={'predictions': [{'embeddings': {'values': [3.0, 4.0] + [0.0] * 766}}]})
     endpoint.install(answer)
     vectors = await providers.embed(['one', 'two'])
     request = endpoint.seen[0]
-    assert str(request.url) == 'https://generativelanguage.googleapis.com/v1beta/models/test-embedding-model:embedContent' and request.headers['x-goog-api-key'] == 'secret-key-value'
-    assert json.loads(request.content) == {'content': {'parts': [{'text': 'one'}]}, 'output_dimensionality': 768}
+    assert str(request.url) == 'https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models/test-embedding-model:predict' and request.headers['authorization'] == 'Bearer secret-key-value'
+    assert json.loads(request.content) == {'instances': [{'content': 'one'}], 'parameters': {'outputDimensionality': 768}}
     assert len(vectors) == 2 and vectors[0][:2] == [0.6, 0.8] and len(endpoint.seen) == 2
-    for status, body, category in ((200, {'embedding': {'values': [1.0] * 10}}, 'invalid_output'), (200, {'nothing': 1}, 'invalid_output'), (402, {}, 'provider_config'), (429, {}, 'rate_limited'), (503, {}, 'provider_unavailable')):
+    for status, body, category in ((200, {'predictions': [{'embeddings': {'values': [1.0] * 10}}]}, 'invalid_output'), (200, {'predictions': []}, 'invalid_output'), (200, {'nothing': 1}, 'invalid_output'), (402, {}, 'provider_config'), (429, {}, 'rate_limited'), (503, {}, 'provider_unavailable')):
         async def failing(request, status=status, body=body):
             return httpx.Response(status, json=body)
         endpoint.install(failing)
@@ -696,7 +697,7 @@ async def test_embed_adapter_request_scaling_and_errors(endpoint, monkeypatch, c
     monkeypatch.setattr(config, 'PROVIDER_TIMEOUT_SECONDS', 0.15)
     async def slow(request):
         await asyncio.sleep(0.06)
-        return httpx.Response(200, json={'embedding': {'values': [1.0] + [0.0] * 767}})
+        return httpx.Response(200, json={'predictions': [{'embeddings': {'values': [1.0] + [0.0] * 767}}]})
     endpoint.install(slow)
     with pytest.raises(providers.ProviderError) as raised:
         await providers.embed(['a', 'b', 'c', 'd'])

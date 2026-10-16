@@ -46,7 +46,7 @@ TLS_KEY = Path(os.environ.get("TLS_KEY", "/home/ubuntu/dreamlog.key"))
 
 
 def data_directory():
-    for key in ("DATA_DIR", "GEMINI_API_KEY", "TEXT_MODEL", "EMBEDDING_MODEL"):
+    for key in ("DATA_DIR", "VERTEX_PROJECT", "TEXT_MODEL", "EMBEDDING_MODEL"):
         if not os.environ.get(key):
             raise RuntimeError(f"Missing required configuration: {key}")
     return Path(os.environ["DATA_DIR"])

@@ -3,15 +3,18 @@ import logging
 import math
 import os
 import secrets
+import time
 
 import httpx
 import msgspec
 import config
 
 logger = logging.getLogger("dreamlog")
-TEXT_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent"
+TEXT_URL = "https://aiplatform.googleapis.com/v1/projects/{project}/locations/global/endpoints/openapi/chat/completions"
+EMBED_URL = "https://aiplatform.googleapis.com/v1/projects/{project}/locations/global/publishers/google/models/{model}:predict"
+TOKEN_URL = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 client = None
+credential = ("", 0.0)
 
 
 # Adapters report every failed call with this one type, so the worker can map it to a task outcome (wiki 4.3.10).
@@ -35,15 +38,32 @@ def failure(status, body, model):
     return ProviderError(category, category != "provider_rejected")
 
 
+# Vertex AI takes a short-lived OAuth token instead of a key. On the server the VM's own service account issues it through the
+# metadata server, so no secret is stored; local development passes one from `gcloud auth print-access-token` instead.
+async def authorization():
+    global credential
+    if supplied := os.environ.get("VERTEX_ACCESS_TOKEN"):
+        return {"Authorization": f"Bearer {supplied}"}
+    if time.monotonic() >= credential[1]:
+        try:
+            body = (await client.get(TOKEN_URL, headers={"Metadata-Flavor": "Google"}, timeout=5)).json()
+            credential = (body["access_token"], time.monotonic() + body["expires_in"] - 60)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            logger.error("provider_config token=unavailable")
+            raise ProviderError("provider_config", True) from None
+    return {"Authorization": f"Bearer {credential[0]}"}
+
+
 async def complete_json(instruction, content, schema, name, answer_type, temperature=None):
     model = os.environ["TEXT_MODEL"]
-    payload = {"model": model, "messages": [{"role": "system", "content": instruction}, {"role": "user", "content": content}],
+    payload = {"model": f"google/{model}", "messages": [{"role": "system", "content": instruction}, {"role": "user", "content": content}],
                "response_format": {"type": "json_schema", "json_schema": {"name": name, "schema": schema}}}
     if temperature is not None:
         payload["temperature"] = temperature
+    headers = await authorization()
     try:
         async with asyncio.timeout(config.PROVIDER_TIMEOUT_SECONDS):
-            response = await client.post(TEXT_URL, json=payload, headers={"Authorization": f"Bearer {os.environ['GEMINI_API_KEY']}"})
+            response = await client.post(TEXT_URL.format(project=os.environ["VERTEX_PROJECT"]), json=payload, headers=headers)
     except (TimeoutError, httpx.TransportError):
         raise ProviderError("network", True) from None
     if response.status_code >= 400:
@@ -67,16 +87,18 @@ async def complete_json(instruction, content, schema, name, answer_type, tempera
 
 async def embed(texts, timeout=None):
     model, vectors = os.environ["EMBEDDING_MODEL"], []
+    url, headers = EMBED_URL.format(project=os.environ["VERTEX_PROJECT"], model=model), await authorization()
     try:
         # One limit stands around the whole list, so a slow service holds the single worker no longer than one ordinary call (wiki 4.3.10).
         async with asyncio.timeout(timeout or config.PROVIDER_TIMEOUT_SECONDS):
+            # Gemini embedding models on Vertex AI take one text per request.
             for text in texts:
-                response = await client.post(EMBED_URL.format(model=model), json={"content": {"parts": [{"text": text}]}, "output_dimensionality": config.EMBEDDING_DIMENSIONS}, headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]})
+                response = await client.post(url, json={"instances": [{"content": text}], "parameters": {"outputDimensionality": config.EMBEDDING_DIMENSIONS}}, headers=headers)
                 if response.status_code >= 400:
                     raise failure(response.status_code, response.text, model)
                 try:
-                    values = [float(value) for value in response.json()["embedding"]["values"]]
-                except (ValueError, KeyError, TypeError):
+                    values = [float(value) for value in response.json()["predictions"][0]["embeddings"]["values"]]
+                except (ValueError, KeyError, IndexError, TypeError):
                     raise ProviderError("invalid_output", True) from None
                 length = math.sqrt(sum(value * value for value in values))
                 if len(values) != config.EMBEDDING_DIMENSIONS or not length:
