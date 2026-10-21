@@ -124,7 +124,7 @@ ON CONFLICT(...) DO UPDATE SET ...;
 | 名称 | 管什么 | 当前项目 |
 | --- | --- | --- |
 | schema（数据库结构） | 有哪些表、列、约束和索引 | `backend/schema.sql` |
-| schema version（结构版本） | 数据库结构升级到了第几版 | 后端 `SCHEMA_VERSION = 5`；手机草稿库为 1 |
+| schema version（结构版本） | 数据库结构升级到了第几版 | 后端 `SCHEMA_VERSION = 6`；手机草稿库为 1 |
 | revision（记录版本） | 某条记录的内容更新到了第几版 | 日记、笔记、个人资料各自的 revision |
 
 **迁移（migration）**是在保留已有数据的前提下升级结构。修改 `CREATE TABLE IF NOT EXISTS` 不会给已有表自动加列；新增列需要显式升级，例如 `ALTER TABLE ... ADD COLUMN ...`。不能把删除数据库文件当升级步骤。[SQLite ALTER TABLE](https://www.sqlite.org/lang_altertable.html)

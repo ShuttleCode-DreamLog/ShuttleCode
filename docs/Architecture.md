@@ -1,6 +1,6 @@
 # Collaborator entry point
 
-The app has five tabs, Journal, Pattern, Add dream (which opens the editor over the tabs), Life notes and Settings, following the team's user-test prototype `DreamLog_User_Test.html` at the repo root (colors, fonts and the shared card, field and button styles in `Theme.swift`). The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. The backend's task worker calls Gemini for the summary and tags (`organize`), the analysis (`analyze`) and pattern discovery (`index_dream`, `match_patterns`, `refresh_findings`).
+The app opens on Home and has a bottom bar with Journal, Pattern, Add dream (which opens the editor over the screen), Life notes and Settings, following the team's user-test prototype `DreamLog_User_Test.html` at the repo root (the header and bar in `Shell.swift`; colors, fonts and the shared card, field and button styles in `Theme.swift`). The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. The backend's task worker calls Gemini for the summary and tags (`organize`), the analysis (`analyze`) and pattern discovery (`index_dream`, `match_patterns`, `refresh_findings`).
 
 ```mermaid
 flowchart LR
@@ -15,11 +15,13 @@ flowchart LR
 
 | Feature | Screen and state | API / backend | Storage |
 | --- | --- | --- | --- |
-| Journal | `JournalView` (the prototype's Home: latest dream, mood bubbles; search and the `JournalFilterSheet`), `JournalModel` (with the queued-draft resend), `DreamEditor`, `DreamModel` | `/v1/dreams`, `/v1/dreams/search`, `dreams.py` (routes and the `organize` handler), `providers.py` (Gemini text adapter) | `dreams`, `outputs`, `tags`; unsent drafts in phone SQLite |
+| Shell | `Shell.swift`: `Header` (the prototype's title bar, `.page(...)`), `BackButton`, `HomeButton` (⌂), `BottomBar`; `RootView` shows one screen above the bar | — | — |
+| Home | `Home.swift`: `HomeView` (latest dream, the Garden of pattern findings, Type a dream; shown while `AppModel.showingHome`); `Bubbles.swift`: `BubbleCluster`, `ClusterLayout` | `/v1/dreams` (the journal's first page), `/v1/patterns` | — |
+| Journal | `JournalView` (search and the `JournalFilterSheet`), `JournalModel` (with the queued-draft resend), `DreamEditor`, `DreamModel` | `/v1/dreams`, `/v1/dreams/search`, `dreams.py` (routes and the `organize` handler), `providers.py` (Gemini text adapter) | `dreams`, `outputs`, `tags`; unsent drafts in phone SQLite |
 | Dream Detail | `DreamDetail.swift`: `DreamDetailView` (switches, summary and tags with corrections, analysis, context used, delete), `AnalysisModel` | `/v1/dreams/{id}/permissions`, `/corrections`, `/analysis` | as Journal and Analysis |
 | Analysis | `AnalysisModel`, `Analysis` types in `AIModels.swift` | `/v1/dreams/{id}/analysis`, `/analysis/refresh`, `analysis.py` (context selection and the `analyze` handler) | `outputs` (type `analysis`), `sources` |
-| Patterns | `PatternsView` (finding cards and Garden), `PatternDetailView` (rename, split, dismiss), `PatternsModel` | `/v1/patterns`, `/v1/patterns/groups/{id}/label`, `/dismiss`, `/split`, `patterns.py` (indexing, matching, findings), `providers.embed` | `dream_vectors`, `occurrences`, `pattern_*` tables (sqlite-vector) |
-| Notes | `NotesView`, `NoteEditorView`, `NotesModel`, `NoteEditorModel` | `/v1/memories`, `memories.py`, `photos.py` | `memories`, `memory_photos`; unsent editor state in memory |
+| Patterns | `PatternsView` (finding cards; Garden is a `BubbleCluster` of the findings), `PatternDetailView` (rename, split, dismiss), `PatternsModel` | `/v1/patterns`, `/v1/patterns/groups/{id}/label`, `/dismiss`, `/split`, `patterns.py` (indexing, matching, findings), `providers.embed` | `dream_vectors`, `occurrences`, `pattern_*` tables (sqlite-vector) |
+| Notes | `NotesView`, `NoteEditorView`, `NotesModel`, `NoteEditorModel` | `/v1/memories` (with `title`), `memories.py`, `photos.py` | `memories` (`title` since version 6), `memory_photos`; unsent editor state in memory |
 | Profile | `ProfileSettings`, `ProfileModel` | `/v1/me/profile`, `profiles.py` | `profiles.fields_json` |
 | Settings and deletion | `Settings` (the Settings tab), `AppModel` (tab, `newDream` for the Add dream tab, `refreshes` on foreground, reconnection or editor close) | `/v1/me`, `records.py` | `users`; delete cascades profiles, notes and journals |
 | AI tasks | `TaskInfo` in `JournalModels.swift`, `failureText` (wiki 4.4.6 wording) in `AIModels.swift` | `/v1/tasks/{id}/retry`, `tasks.py` (worker), `records.py` (`charge`), `providers.py` | `tasks`, `usage` |
@@ -31,7 +33,7 @@ All Swift files above are in `ios/DreamLog/`; backend files are in `backend/`. R
 
 - A normal profile field: add one `ProfileField` to `profileFields` in `ProfileSettings.swift`. Keys and values already round-trip through the dictionary API and SQLite JSON. Users can add or remove fields in Settings too. Add special backend validation in `profiles.py` only when the new field needs it; age already has a numeric rule. All values are strings.
 - A new feature: put its route functions and SQL in one backend module, register routes in `main.py`, add the corresponding JSON value types/APIClient methods and a SwiftUI screen with an observable state model. Follow an existing feature rather than introducing a service/ORM/repository layer.
-- New persistence: change `schema.sql`, increment `SCHEMA_VERSION` and add an explicit, tested upgrade path in `db.py`. Backend version 3 adds note photos to versions 1/2 without replacing data; version 4 adds the pattern tables and version 5 adds `dream_vectors`, each preserving earlier versions the same way. The phone draft schema remains version 1.
+- New persistence: change `schema.sql`, increment `SCHEMA_VERSION` and add an explicit, tested upgrade path in `db.py`. Backend version 3 adds note photos to versions 1/2 without replacing data; version 4 adds the pattern tables, version 5 adds `dream_vectors` and version 6 adds the note `title` column, each preserving earlier versions the same way. The phone draft schema remains version 1.
 - Privacy text: edit `privacyParts` and increase `noticeVersion` in `PrivacyNotice.swift`. First launch and Settings read the same six short parts. The user requested provisional, brief copy; this supersedes the wiki's full copy for this development build. The acknowledgment gate remains active.
 - Cloud: configure the HTTPS origin, TLS and data directory. The mobile app continues calling the same API. Managed database/release differences belong in [ProductionTransition.md](ProductionTransition.md).
 

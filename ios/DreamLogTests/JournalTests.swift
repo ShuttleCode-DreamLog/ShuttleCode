@@ -22,8 +22,8 @@ extension FoundationTests {
         #expect(BackendProtocol.state.withLock { $0.requests.count } == 1)
         await closeJournalApp(app)
     }
-    func journalDream(id: String, text: String = "An invented dream.", revision: Int = 1) -> Dream {
-        Dream(id: id, text: text, revision: revision, dreamDate: journalDate(), title: nil, mood: nil, source: .text, audioStatus: "none", permissions: Permissions(), tasks: [], createdAt: .now, updatedAt: .now)
+    func journalDream(id: String, text: String = "An invented dream.", title: String? = nil, revision: Int = 1) -> Dream {
+        Dream(id: id, text: text, revision: revision, dreamDate: journalDate(), title: title, mood: nil, source: .text, audioStatus: "none", permissions: Permissions(), tasks: [], createdAt: .now, updatedAt: .now)
     }
     func dreamResponse(_ dream: Dream) throws -> Data {
         let encoder = JSONEncoder()
@@ -119,7 +119,8 @@ extension FoundationTests {
         await model.save(app)
         #expect(try await app.store.draft(id).get()?.unconfirmed == true)
         #expect(model.draft?.text == "An invented dream.")
-        enqueue([(200, try dreamResponse(journalDream(id: id)))])
+        // The stored entry carries the first-sentence title the save sent, so reading it back needs no second PUT.
+        enqueue([(200, try dreamResponse(journalDream(id: id, title: "An invented dream")))])
         await model.save(app)
         #expect(BackendProtocol.state.withLock { $0.requests.map(\.httpMethod) } == ["PUT", "GET"])
         #expect(try await app.store.draft(id).get() == nil)

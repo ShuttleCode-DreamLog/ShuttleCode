@@ -17,6 +17,7 @@ nonisolated enum EventPrecision: String, Codable, CaseIterable { case exact, app
 
 nonisolated struct Memory: Codable, Identifiable {
     var id: String
+    var title: String?
     var text: String
     var recordedAt: Date
     var eventDate: String?
@@ -33,15 +34,17 @@ nonisolated struct MemoryPage: Decodable { var items: [Memory]; var hasMore: Boo
 nonisolated struct MemoryResponse: Decodable { var memory: Memory }
 nonisolated struct MemorySave: Encodable {
     var baseRevision: Int = 0
+    var title = ""
     var text = ""
     var eventDate: String?
     var eventPrecision: EventPrecision = .unknown
     var isOngoing = false
     var allowAnalysis = true
-    enum CodingKeys: String, CodingKey { case baseRevision, text, eventDate, eventPrecision, isOngoing, allowAnalysis }
+    enum CodingKeys: String, CodingKey { case baseRevision, title, text, eventDate, eventPrecision, isOngoing, allowAnalysis }
     func encode(to encoder: any Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(baseRevision, forKey: .baseRevision)
+        try values.encode(title, forKey: .title)
         try values.encode(text, forKey: .text)
         try values.encode(eventDate, forKey: .eventDate)
         try values.encode(eventPrecision, forKey: .eventPrecision)
@@ -50,7 +53,7 @@ nonisolated struct MemorySave: Encodable {
     }
     init() {}
     init(_ memory: Memory) {
-        baseRevision = memory.revision; text = memory.text; eventDate = memory.eventDate
+        baseRevision = memory.revision; title = memory.title ?? ""; text = memory.text; eventDate = memory.eventDate
         eventPrecision = memory.eventPrecision; isOngoing = memory.isOngoing; allowAnalysis = memory.allowAnalysis
     }
 }
@@ -99,12 +102,12 @@ final class NoteEditorModel {
     private func current(_ app: AppModel) -> Bool { epoch == app.journalEpoch && app.noticeSeen && !app.deleting }
     var hasChanges: Bool {
         if !pendingPhotos.isEmpty { return true }
-        guard let stored else { return !value.text.isEmpty }
-        return value.text != stored.text || value.eventDate != stored.eventDate || value.eventPrecision != stored.eventPrecision || value.isOngoing != stored.isOngoing || value.allowAnalysis != stored.allowAnalysis
+        guard let stored else { return !value.text.isEmpty || !value.title.isEmpty }
+        return value.text != stored.text || value.title != (stored.title ?? "") || value.eventDate != stored.eventDate || value.eventPrecision != stored.eventPrecision || value.isOngoing != stored.isOngoing || value.allowAnalysis != stored.allowAnalysis
     }
     func canSave(_ app: AppModel) -> Bool {
         let content = !value.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingPhotos.isEmpty || !(stored?.photos.isEmpty ?? true)
-        return content && (value.text.isEmpty || !value.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && value.text.unicodeScalars.count <= app.limits.maxMemoryChars && !isLoading && !isSending && !isAddingPhotos && !conflict && !missing
+        return content && (value.text.isEmpty || !value.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) && value.text.unicodeScalars.count <= app.limits.maxMemoryChars && value.title.unicodeScalars.count <= app.limits.maxTitleChars && !isLoading && !isSending && !isAddingPhotos && !conflict && !missing
     }
     func load(_ app: AppModel) async {
         guard app.noticeSeen, !app.deleting, !isLoading, let client = app.client else { return }

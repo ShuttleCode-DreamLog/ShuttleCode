@@ -1,6 +1,8 @@
 import SwiftUI
 import PhotosUI
 
+nonisolated func noteLabel(_ note: Memory) -> String { note.title?.isEmpty == false ? note.title! : "Note" }
+
 struct NotesView: View {
     @Environment(AppModel.self) private var app
     @State private var model = NotesModel()
@@ -12,27 +14,21 @@ struct NotesView: View {
                 LazyVStack(alignment: .leading, spacing: 13) {
                     Eyebrow("Your waking world")
                     PageHeading("Small moments matter.")
-                    Button("Add note") { creating = EntryRoute(id: newID()) }.buttonStyle(.primaryWide).accessibilityIdentifier("addNote")
-                    VStack(alignment: .leading, spacing: 6) {
-                        HistoryToggle().font(.callout)
-                        Hint("The same switch as in Settings: it also covers earlier dreams. A note is used only when this and the note's own Allow AI use are both on.")
-                    }.card()
                     if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
-                    if model.items.isEmpty && !model.isLoading {
-                        EmptyCard(title: "No life notes", text: "Tap Add note to record an event or thought from your waking life.")
-                    }
+                    if model.items.isEmpty && !model.isLoading { EmptyCard("No notes yet") }
                     ForEach(model.items) { note in NavigationLink(value: note.id) { NoteCard(note: note) }.buttonStyle(.plain) }
                     if model.hasMore {
                         Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading)
                     }
                     if model.isLoading { ProgressView().frame(maxWidth: .infinity) }
+                    Button("Add note") { creating = EntryRoute(id: newID()) }.buttonStyle(.primaryWide).accessibilityIdentifier("addNote")
+                    HistoryToggle().font(.callout).switchRow()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(24)
             }
             .dreamPage()
-            .navigationTitle("Life notes")
-            .navigationBarTitleDisplayMode(.inline)
+            .page(Header("Life notes") { HomeButton() })
             .navigationDestination(for: String.self) { NoteEditorView(id: $0) }
             .sheet(item: $creating, onDismiss: { Task { await model.load(app) } }) { entry in
                 NavigationStack { NoteEditorView(id: entry.id, newEntry: true) }
@@ -51,15 +47,17 @@ struct NoteCard: View {
         VStack(alignment: .leading, spacing: 6) {
             Hint([note.eventDate.map(shortDate) ?? note.recordedAt.formatted(.dateTime.month(.abbreviated).day()), note.isOngoing ? "Ongoing" : nil]
                 .compactMap(\.self).joined(separator: " · "))
+            Text(noteLabel(note)).font(.heading)
             Text(note.text.isEmpty ? "Photo note" : note.text).font(.callout).lineLimit(3)
-            Hint(["Allow AI use: \(note.allowAnalysis ? "On" : "Off")", note.photos.isEmpty ? nil : "\(note.photos.count) photo\(note.photos.count == 1 ? "" : "s")"]
-                .compactMap(\.self).joined(separator: " · "))
+            let details = [note.allowAnalysis ? nil : "AI use off", note.photos.isEmpty ? nil : "\(note.photos.count) photo\(note.photos.count == 1 ? "" : "s")"].compactMap(\.self)
+            if !details.isEmpty { Hint(details.joined(separator: " · ")) }
         }
         .multilineTextAlignment(.leading)
         .card()
     }
 }
 
+// The prototype's note page (date, Edit, text) and note editor (title, date, text, Cancel and Save note); the rest folds under More.
 struct NoteEditorView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -67,6 +65,7 @@ struct NoteEditorView: View {
     @State private var confirmingDelete = false
     @State private var confirmingClose = false
     @State private var showingSaveError = false
+    @State private var showMore = false
     @FocusState private var writingText: Bool
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var removingPhoto: String?
@@ -84,7 +83,12 @@ struct NoteEditorView: View {
                 }
                 if model.isEditing { editingBlock } else if let stored = model.stored { readingBlock(stored) }
                 photosBlock
-                if model.stored != nil {
+                if model.isEditing {
+                    HStack(spacing: 10) {
+                        Button("Cancel") { cancel() }.buttonStyle(.secondary)
+                        Button("Save note") { Task { await save() } }.buttonStyle(.primary).disabled(!model.canSave(app)).accessibilityIdentifier("saveNote")
+                    }.padding(.top, 8)
+                } else if model.stored != nil {
                     Button("Delete note", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet).padding(.top, 8)
                 }
             }
@@ -92,22 +96,8 @@ struct NoteEditorView: View {
             .padding(24)
         }
         .dreamPage()
+        .page(header)
         .disabled(model.isSending)
-        .navigationTitle(newEntry ? "New note" : "Life note")
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(model.isSending)
-        .toolbar {
-            if newEntry {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { if model.hasChanges { confirmingClose = true } else { dismiss() } }.disabled(model.isSending || model.isAddingPhotos)
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                if model.isSending { ProgressView() }
-                else if model.isEditing { Button("Save") { Task { await save() } }.disabled(!model.canSave(app)).accessibilityIdentifier("saveNote") }
-                else if model.stored != nil { Button("Edit") { model.isEditing = true } }
-            }
-        }
         .task { await model.load(app) }
         .interactiveDismissDisabled(model.hasChanges || model.isSending || model.isAddingPhotos)
         .onChange(of: selectedPhotos) { _, items in
@@ -130,9 +120,26 @@ struct NoteEditorView: View {
             Text(model.error ?? "The note was not saved. Your input is still here; try again.")
         }
     }
+    @ViewBuilder private var header: some View {
+        let title = model.isEditing ? (newEntry ? "New note" : "Edit note") : (model.stored.map(noteLabel) ?? "Note")
+        if newEntry {
+            Header(title, leading: { BackButton(label: "Done") { close() } }, trailing: { EmptyView() })
+        } else {
+            Header(title, leading: { BackButton() }, trailing: { HomeButton() })
+        }
+    }
     @ViewBuilder private var editingBlock: some View {
         @Bindable var editor = model
-        Hint("Your note")
+        TextField("Title (optional)", text: $editor.value.title).font(.heading).accessibilityIdentifier("noteTitle")
+        Toggle("Event has a date", isOn: Binding(get: { model.value.eventDate != nil }, set: { enabled in
+            model.value.eventDate = enabled ? journalDate() : nil
+            model.value.eventPrecision = enabled ? .exact : .unknown
+        })).font(.callout).switchRow()
+        if model.value.eventDate != nil {
+            LabeledRow("Date") {
+                DatePicker("Date", selection: Binding(get: { journalDay(model.value.eventDate ?? journalDate()) }, set: { model.value.eventDate = journalDate($0) }), displayedComponents: .date).labelsHidden()
+            }
+        }
         TextEditor(text: $editor.value.text)
             .font(.callout).scrollContentBackground(.hidden).focused($writingText)
             .frame(minHeight: 220).fixedSize(horizontal: false, vertical: true)
@@ -144,25 +151,18 @@ struct NoteEditorView: View {
             }
             .field()
         Hint("\(model.value.text.unicodeScalars.count) / \(app.limits.maxMemoryChars) characters")
-        Heading("Details")
-        Group {
-            Toggle("Event has a date", isOn: Binding(get: { model.value.eventDate != nil }, set: { enabled in
-                model.value.eventDate = enabled ? journalDate() : nil
-                model.value.eventPrecision = enabled ? .exact : .unknown
-            })).switchRow()
-            if model.value.eventDate != nil {
-                LabeledRow("Event date") {
-                    DatePicker("Event date", selection: Binding(get: { journalDay(model.value.eventDate ?? journalDate()) }, set: { model.value.eventDate = journalDate($0) }), displayedComponents: .date).labelsHidden()
+        DisclosureGroup("More", isExpanded: $showMore) {
+            VStack(alignment: .leading, spacing: 4) {
+                if model.value.eventDate != nil {
+                    Picker("Date precision", selection: $editor.value.eventPrecision) {
+                        Text("Exact").tag(EventPrecision.exact)
+                        Text("Approximate").tag(EventPrecision.approximate)
+                    }.pickerStyle(.segmented).padding(.vertical, 8)
                 }
-                Picker("Date precision", selection: $editor.value.eventPrecision) {
-                    Text("Exact").tag(EventPrecision.exact)
-                    Text("Approximate").tag(EventPrecision.approximate)
-                }.pickerStyle(.segmented)
-            }
-            Toggle("Still going on", isOn: $editor.value.isOngoing).switchRow()
-            Toggle("Allow AI use", isOn: $editor.value.allowAnalysis).switchRow()
-        }.font(.callout)
-        Hint("This switch and “Use life notes and earlier dreams” in Settings must both be on for this note to be sent with a dream's analysis.")
+                Toggle("Still going on", isOn: $editor.value.isOngoing).switchRow()
+                Toggle("Allow AI use", isOn: $editor.value.allowAnalysis).switchRow()
+            }.padding(.top, 8)
+        }.font(.callout).padding(.top, 8)
         if model.conflict {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Stored note changed").font(.heading)
@@ -176,19 +176,25 @@ struct NoteEditorView: View {
             }.card()
         }
         if model.missing { Button("Save as a new note") { Task { await model.saveAsNew(app) } }.buttonStyle(.secondary) }
-        Hint("Tap Save to store this note. Unsent notes are kept only while this editor is open.")
     }
     @ViewBuilder private func readingBlock(_ stored: Memory) -> some View {
-        Hint(stored.eventDate.map(displayDate) ?? stored.recordedAt.formatted(date: .abbreviated, time: .omitted))
-        Text(stored.text).font(.callout).textSelection(.enabled)
-        Heading("Details")
-        LabeledRow("Recorded") { Text(stored.recordedAt.formatted(date: .abbreviated, time: .shortened)).font(.callout) }
-        if let date = stored.eventDate {
-            LabeledRow("Event date") { Text(displayDate(date)).font(.callout) }
-            LabeledRow("Precision") { Text(stored.eventPrecision.rawValue.capitalized).font(.callout) }
+        HStack(alignment: .firstTextBaseline) {
+            Hint(stored.eventDate.map(displayDate) ?? stored.recordedAt.formatted(date: .abbreviated, time: .omitted))
+            Spacer()
+            Button("Edit") { model.isEditing = true }.buttonStyle(.secondary)
         }
-        LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
-        LabeledRow("Allow AI use") { Text(stored.allowAnalysis ? "On" : "Off").font(.callout) }
+        Text(stored.text).font(.callout).textSelection(.enabled)
+        DisclosureGroup("More", isExpanded: $showMore) {
+            VStack(alignment: .leading, spacing: 0) {
+                LabeledRow("Recorded") { Text(stored.recordedAt.formatted(date: .abbreviated, time: .shortened)).font(.callout) }
+                if let date = stored.eventDate {
+                    LabeledRow("Event date") { Text(displayDate(date)).font(.callout) }
+                    LabeledRow("Precision") { Text(stored.eventPrecision.rawValue.capitalized).font(.callout) }
+                }
+                LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
+                LabeledRow("Allow AI use") { Text(stored.allowAnalysis ? "On" : "Off").font(.callout) }
+            }.padding(.top, 8)
+        }.font(.callout).padding(.top, 8)
     }
     @ViewBuilder private var photosBlock: some View {
         let saved = model.stored?.photos ?? []
@@ -197,7 +203,7 @@ struct NoteEditorView: View {
             ForEach(saved) { photo in
                 if let data = model.photoContent[photo.id], let image = UIImage(data: data) {
                     Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 260).clipShape(RoundedRectangle(cornerRadius: 15)).accessibilityLabel("Saved note photo")
-                } else { Hint("Photo could not be loaded.") }
+                } else { Hint("Photo could not be loaded") }
                 if model.isEditing { Button("Remove photo", role: .destructive) { removingPhoto = photo.id }.buttonStyle(.quiet) }
             }
             ForEach(model.pendingPhotos) { photo in
@@ -211,11 +217,17 @@ struct NoteEditorView: View {
                 .buttonStyle(.secondary)
                 .disabled(model.isAddingPhotos || saved.count + model.pendingPhotos.count >= 5)
                 if model.isAddingPhotos { ProgressView("Preparing photos…") }
-                Hint("Up to 5 photos. Tap Save to upload; text is optional for photo notes.")
             }
         }
     }
     private func reload() { Task { await model.load(app) } }
+    private func close() {
+        guard !model.isSending, !model.isAddingPhotos else { return }
+        if model.hasChanges { confirmingClose = true } else { dismiss() }
+    }
+    private func cancel() {
+        if model.stored != nil { model.useStored() } else { close() }
+    }
     private func save(close: Bool = false) async {
         writingText = false
         if await model.save(app) {

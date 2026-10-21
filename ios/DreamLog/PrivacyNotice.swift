@@ -42,21 +42,18 @@ struct PrivacyText: View {
 struct PrivacyNoticeView: View {
     @Environment(AppModel.self) private var model
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 13) {
-                    Eyebrow("Before you begin")
-                    Text(noticeIntroduction).font(.callout)
-                    PrivacyText()
-                    Button("I acknowledge this notice") { Task { await model.acknowledgeNotice() } }.buttonStyle(.primaryWide).padding(.top, 8)
-                    if model.hasPriorAcknowledgment { DeleteJournalButton() }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(24)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 13) {
+                Eyebrow("Before you begin")
+                Text(noticeIntroduction).font(.callout)
+                PrivacyText()
+                Button("I acknowledge this notice") { Task { await model.acknowledgeNotice() } }.buttonStyle(.primaryWide).padding(.top, 8)
+                if model.hasPriorAcknowledgment { DeleteJournalButton() }
             }
-            .dreamPage()
-            .navigationTitle("Privacy notice")
-            .navigationBarTitleDisplayMode(.inline)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
         }
+        .dreamPage()
+        .page(Header("Privacy notice"))
     }
 }

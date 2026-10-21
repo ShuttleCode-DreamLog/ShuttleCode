@@ -78,9 +78,9 @@ struct PatternsView: View {
                         Text("List").tag(false)
                         Text("Garden").tag(true)
                     }.pickerStyle(.segmented)
-                    Hint(periodText)
                     if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
                     if let response = model.response {
+                        Hint("\(displayDate(response.period.fromDate)) – \(displayDate(response.period.toDate)) · \(response.eligibleDreams) eligible recorded dreams")
                         if !response.available {
                             Text("New matching is not available on the server at the moment. Patterns found earlier are still shown.").font(.callout).card()
                         }
@@ -88,7 +88,7 @@ struct PatternsView: View {
                             ErrorCard("The findings could not be updated. \(failureText(task))", retryTitle: "Retry") { Task { await model.retry(app) } }
                         }
                         if response.insufficientHistory {
-                            EmptyCard(title: "Not enough recorded history yet", text: "A pattern appears once two or more of your dreams share a person, place, feeling or theme. Keep recording.")
+                            EmptyCard("Not enough recorded history yet")
                         } else if garden {
                             gardenBlock(response)
                         } else {
@@ -104,8 +104,7 @@ struct PatternsView: View {
                 .padding(24)
             }
             .dreamPage()
-            .navigationTitle("Patterns")
-            .navigationBarTitleDisplayMode(.inline)
+            .page(Header("Patterns") { HomeButton() })
             .routeDestinations()
             .navigationDestination(for: PatternRoute.self) { route in PatternDetailView(groupId: route.groupId, model: model) }
             .disabled(model.isSending)
@@ -115,42 +114,17 @@ struct PatternsView: View {
             .onChange(of: app.refreshes) { Task { await model.load(app) } }
         }
     }
-    private var periodText: String {
-        guard let response = model.response else { return "Patterns come from your recorded dreams; nothing needs to be started." }
-        return "\(displayDate(response.period.fromDate)) – \(displayDate(response.period.toDate)) · \(response.eligibleDreams) eligible recorded dreams. Findings are possibilities, not proof of a shared meaning."
-    }
-
     // Garden: the same findings as plants sized by the number of distinct dreams that contain them (EGMUIUX S10).
     @ViewBuilder private func gardenBlock(_ response: PatternsResponse) -> some View {
-        let largest = Double(response.findings.map(\.supportingDreams).max() ?? 1)
         let current = response.findings.first { $0.groupId == selected } ?? response.findings.first
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 16) {
-            ForEach(response.findings) { finding in
-                let chosen = finding.groupId == current?.groupId
-                let size = 64 + 56 * Double(finding.supportingDreams) / largest
-                Button { selected = finding.groupId } label: {
-                    VStack(spacing: 4) {
-                        Circle()
-                            .fill(chosen ? Color.soft : Color.card)
-                            .strokeBorder(chosen ? Color.sage : Color.bubble, style: StrokeStyle(lineWidth: chosen ? 2 : 1, dash: finding.kind == .recurring ? [] : [4, 3]))
-                            .frame(width: size, height: size)
-                            .overlay { Text(finding.name).font(.system(.caption, design: .serif).weight(chosen ? .bold : .regular)).multilineTextAlignment(.center).padding(6) }
-                        Rectangle().fill(Color.sage.opacity(0.4)).frame(width: 2, height: 14)
-                        Hint("\(finding.supportingDreams) dreams")
-                    }.frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(finding.name), \(finding.supportingDreams) dreams\(chosen ? ", selected" : "")")
-            }
-        }
-        .padding(.vertical, 8).card()
-        Hint("Each plant is a theme found in your dreams; its size shows how many distinct dreams contain it. Dashed plants are related examples that do not yet recur.")
+        BubbleCluster(bubbles: response.findings.map { Bubble(id: $0.groupId, label: $0.name, weight: Double($0.supportingDreams), dashed: $0.kind != .recurring) },
+                      selected: current?.groupId) { selected = $0 }
+            .padding(.vertical, 8)
         if let current {
             Heading("\(current.name) · \(current.supportingDreams) distinct dreams")
             ForEach(current.examples) { example in
                 NavigationLink(value: Route.dream(example.dreamId)) { ExampleCard(example: example) }.buttonStyle(.plain)
             }
-            Hint("Tap a dream to open it. Rename, split and dismiss are on the pattern's page in List view.")
         }
     }
 }
@@ -170,15 +144,23 @@ struct FindingCard: View {
     }
 }
 
+// A supporting dream as the prototype's dream card: date, title, what it shares, and the excerpt in place of the summary.
 struct ExampleCard: View {
     let example: FindingExample
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Hint(shortDate(example.dreamDate))
-            Text(example.name).font(.heading)
-            Text("“\(example.excerpt)”").font(.callout).foregroundStyle(Color.muted)
-            if let shared = example.sharedElement { Hint("Shared: \(shared)") }
-            if let difference = example.difference { Hint("Different: \(difference)") }
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Hint(shortDate(example.dreamDate))
+                Text(example.name).font(.heading)
+                Wrap(spacing: 4) {
+                    Pill(example.description)
+                    if let shared = example.sharedElement { Pill(shared) }
+                }
+                Text("“\(example.excerpt)”").font(.callout).foregroundStyle(Color.muted)
+                if let difference = example.difference { Hint("Different: \(difference)") }
+            }
+            Spacer(minLength: 0)
+            Text(glyph(nil)).font(.glyph).foregroundStyle(Color.motif)
         }
         .multilineTextAlignment(.leading)
         .card()
@@ -220,7 +202,7 @@ struct PatternDetailView: View {
                     Heading("Summary & analysis")
                     if finding.status == .refreshing { Label("The explanation is being updated.", systemImage: "hourglass").font(.callout) }
                     else if let explanation = finding.explanation { Text(explanation).font(.callout) }
-                    else { Hint("No explanation yet.") }
+                    else { Hint("No explanation yet") }
                     if !finding.notes.isEmpty {
                         Hint("Your notes sent with this pattern")
                         ForEach(finding.notes, id: \.self) { Text($0).font(.callout) }
@@ -232,18 +214,16 @@ struct PatternDetailView: View {
                             Button("Remove note") { Task { await model.dismiss(app, finding, dreamId: note.dreamId, note: "") } }.buttonStyle(.quiet)
                         }
                     }
-                    Hint("Findings are possibilities, not proof of a shared meaning.")
                     DisclosureGroup("Correct this pattern", isExpanded: $correcting) { corrections(finding) }.font(.callout).padding(.top, 8)
                 } else if model.response != nil {
-                    EmptyCard(title: "This pattern changed", text: "It is no longer among the findings. Go back to see the current patterns.")
+                    EmptyCard("This pattern is no longer among the findings")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(24)
         }
         .dreamPage()
-        .navigationTitle(finding?.name ?? "Pattern")
-        .navigationBarTitleDisplayMode(.inline)
+        .page(Header(finding?.name ?? "Pattern", leading: { BackButton() }, trailing: { HomeButton() }))
         .alert("Rename pattern", isPresented: $renaming) {
             TextField("Pattern name", text: $name)
             Button("Save") { rename() }
@@ -296,12 +276,11 @@ struct PatternDetailView: View {
             ForEach(finding.examples) { example in
                 Button("Not part of this pattern: \(example.name)") { dismissing = example }.buttonStyle(.quiet)
             }
-            Hint("If two different people were treated as one, correct the tag on the dream's screen, or dismiss or split here with a note.")
         }.padding(.top, 10)
     }
     private func splitPreview(_ finding: Finding) -> String {
         let remaining = finding.supportingDreams - moving.count
         let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return "Preview: “\(finding.name)” keeps \(remaining) dream\(remaining == 1 ? "" : "s") · “\(name.isEmpty ? "New group" : name)” gets \(moving.count) dream\(moving.count == 1 ? "" : "s"). A group with one dream is not yet recurring and is not shown."
+        return "“\(finding.name)” keeps \(remaining) dream\(remaining == 1 ? "" : "s") · “\(name.isEmpty ? "New group" : name)” gets \(moving.count) dream\(moving.count == 1 ? "" : "s")"
     }
 }

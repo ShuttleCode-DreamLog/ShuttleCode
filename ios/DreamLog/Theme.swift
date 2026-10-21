@@ -8,14 +8,10 @@ private nonisolated func shade(_ light: UInt32, _ dark: UInt32) -> UIColor {
     let color = { (hex: UInt32) in UIColor(red: channel(hex, 16), green: channel(hex, 8), blue: channel(hex, 0), alpha: 1) }
     return UIColor { $0.userInterfaceStyle == .dark ? color(dark) : color(light) }
 }
-let inkColor = shade(0x303C39, 0xE6E9E4)
-let paperColor = shade(0xFAF9F5, 0x1B201E)
-let lineColor = shade(0xE0E5DC, 0x363F3A)
-
 extension Color {
-    static let ink = Color(uiColor: inkColor)
-    static let paper = Color(uiColor: paperColor)
-    static let line = Color(uiColor: lineColor)
+    static let ink = Color(uiColor: shade(0x303C39, 0xE6E9E4))
+    static let paper = Color(uiColor: shade(0xFAF9F5, 0x1B201E))
+    static let line = Color(uiColor: shade(0xE0E5DC, 0x363F3A))
     static let muted = Color(uiColor: shade(0x7B8882, 0x9AA59F))
     static let sage = Color(uiColor: shade(0x527666, 0x8FB39F))
     static let card = Color(uiColor: shade(0xFFFEFA, 0x232927))
@@ -23,33 +19,17 @@ extension Color {
     static let danger = Color(uiColor: shade(0xA45650, 0xD98A84))
     static let motif = Color(uiColor: shade(0x93A684, 0x6F8A6B))
     static let bubble = Color(uiColor: shade(0xB9C7AA, 0x5E7360))
+    static let tintYellow = Color(uiColor: shade(0xEEE6C3, 0x6B6238))
+    static let tintGreen = Color(uiColor: shade(0xE9EFDF, 0x3F5238))
+    static let tintBlue = Color(uiColor: shade(0xDCE9EF, 0x34505E))
+    static let tintLavender = Color(uiColor: shade(0xE6E0EF, 0x49405E))
+    static let tintPeach = Color(uiColor: shade(0xF1E3D8, 0x5E473A))
 }
 
 extension Font {
     static let display = Font.system(.title, design: .serif)
     static let heading = Font.system(.title3, design: .serif)
     static let glyph = Font.system(size: 56, design: .serif)
-}
-
-// Serif titles in the navigation bar, as the prototype's Georgia headers, on paper instead of the system bar material.
-// Roots use inline titles: their page heading is the prototype's h2 in the content, and iOS 27 did not draw a styled large title.
-func applyHeaderStyle() {
-    let bar = UINavigationBar.appearance()
-    bar.standardAppearance = headerAppearance(hairline: true)
-    bar.scrollEdgeAppearance = headerAppearance(hairline: false)
-}
-
-private func headerAppearance(hairline: Bool) -> UINavigationBarAppearance {
-    let serif = { (style: UIFont.TextStyle) in
-        let base = UIFontDescriptor.preferredFontDescriptor(withTextStyle: style)
-        return UIFont(descriptor: base.withDesign(.serif) ?? base, size: base.pointSize)
-    }
-    let appearance = UINavigationBarAppearance()
-    appearance.configureWithOpaqueBackground()
-    appearance.backgroundColor = paperColor
-    appearance.shadowColor = hairline ? lineColor : .clear
-    appearance.titleTextAttributes = [.font: serif(.headline), .foregroundColor: inkColor]
-    return appearance
 }
 
 extension View {
@@ -135,13 +115,8 @@ struct ErrorCard: View {
 
 struct EmptyCard: View {
     let title: String
-    let text: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.heading)
-            Hint(text)
-        }.card()
-    }
+    init(_ title: String) { self.title = title }
+    var body: some View { Text(title).font(.heading).card() }
 }
 
 struct PrimaryButton: ButtonStyle {

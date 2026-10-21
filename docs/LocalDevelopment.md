@@ -49,6 +49,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl keychain b
 
 Run the app again. The committed server URL is the deployed course server `https://34.66.84.214`. To use the backend on this Mac instead, set the DreamLog target's `DREAMLOG_SERVER_URL` build setting to `https://127.0.0.1:8443` locally without committing it, or pass `DREAMLOG_SERVER_URL=https://127.0.0.1:8443` to `xcodebuild`. For the deployed server, trust its committed certificate instead of the local one: `xcrun simctl keychain booted add-root-cert backend/deploy/dreamlog.crt`. The short development notice appears before the tabs. The Add dream tab or Type a dream on the Journal opens an editor; Done saves automatically, Revert abandons edits. Notes retains Save and supports Add photos; photo-only notes are allowed. Tap a saved row to read, edit or delete it. Unsent Journal text remains as a local draft; unsent Notes/photos stay only in the open editor. Settings lets you edit name, age and other profile fields, add/remove fields and Save profile. It also exposes history, the shared privacy text and Delete my journal. See [Architecture.md](Architecture.md) and [API.md](API.md).
 
+To see the Garden with more than a bubble or two, seed the simulator's local journal with invented dreams: `python3 scripts/seed-local.py` (it picks the user with the most dreams in `backend/.local/data/dreamlog.db`, or pass `--user`), then wait for the tags it prints. The launcher's Vertex AI token lasts an hour; after that every AI task answers `provider_config` and waits, and restarting the launcher resumes them.
+
 Run tests with Product → Test or:
 
 ```sh
@@ -80,6 +82,6 @@ The same backend reads `DATA_DIR`, `TLS_CERT`, `TLS_KEY`, `PORT`, `VERTEX_PROJEC
 - Notes Save fails / Done asks to discard: keep the editor open, start `./scripts/run-local.sh`, and retry Save without losing the text. The updated editor shows a save-failure alert and Done also offers Save and close or Keep editing. A backend must be running for storage; Xcode only starts the app.
 - Connection/certificate error: check the running backend, port, server URL, certificate dates/SAN and simulator trust. Trust the certificate separately on each simulator you use.
 - Keychain error: retain code signing, unlock the device, then retry. The app intentionally does not generate a temporary fallback ID.
-- Schema version error: do not silently overwrite the database. Backend schema version 5 upgrades versions 1–4 additively with profiles, note photos, pattern tables and dream vectors and preserves existing records; other mismatches refuse startup. The phone draft schema remains version 1.
+- Schema version error: do not silently overwrite the database. Backend schema version 6 upgrades versions 1–5 additively with profiles, note photos, pattern tables, dream vectors and the note title and preserves existing records; other mismatches refuse startup. The phone draft schema remains version 1.
 
 The app never shows its identity. Reinstalling alone does not reliably clear Keychain or delete server data; use Delete my journal for a full reset.

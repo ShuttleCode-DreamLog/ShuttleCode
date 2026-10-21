@@ -69,14 +69,14 @@ nonisolated enum CorrectionTarget: Identifiable {
     var id: String { if case let .tag(tag) = self { tag.id } else { "summary" } }
 }
 
-// The six switches with their fixed lines (wiki 4.5.8).
-let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, title: String, line: String)] = [
-    ("analysis", \.analysis, "Analysis", "Sends this dream's text, date, and mood to the AI service for a summary, tags, and an analysis. When it is off, none of the three is made and the dream takes no part in pattern findings."),
-    ("history", \.history, "Use as history", "Lets this dream's text be sent as an earlier dream when another dream is analyzed or discussed. This is separate from the analysis switch: with history on, the text can be sent even when this dream's own analysis is off."),
-    ("patterns", \.patterns, "Patterns and search", "Sends this dream's text to the AI service so that it can be found by meaning and compared with other dreams."),
-    ("transcription", \.transcription, "Transcription", "Sends this dream's recording to the AI service to turn it into text."),
-    ("discussion", \.discussion, "Discussion", "Sends this dream and your messages about it to the AI service for replies, together with its summary, tags, and analysis where they exist, also when the analysis switch is off."),
-    ("visuals", \.visuals, "Visuals", "Sends a scene of this dream to the AI service to make a picture or a video.")
+// The six switches (wiki 4.5.8); their explanatory lines are not shown, the privacy notice covers what each AI use sends.
+let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, title: String)] = [
+    ("analysis", \.analysis, "Analysis"),
+    ("history", \.history, "Use as history"),
+    ("patterns", \.patterns, "Patterns and search"),
+    ("transcription", \.transcription, "Transcription"),
+    ("discussion", \.discussion, "Discussion"),
+    ("visuals", \.visuals, "Visuals")
 ]
 let historyOffLine = "Turning this off removes the parts of analyses that cite it and starts the discussions that used it afresh. Turning it on again does not bring them back."
 let correctionLine = "A correction marks the analysis as outdated and starts the discussion afresh."
@@ -89,7 +89,7 @@ struct DreamDetailView: View {
     @State private var analysis: AnalysisModel
     @State private var editing = false
     @State private var showSwitches = false
-    @State private var showContext = false
+    @State private var showMore = false
     @State private var confirmingDelete = false
     @State private var confirmingKeepOut = false
     @State private var confirmingHistoryOff = false
@@ -109,7 +109,7 @@ struct DreamDetailView: View {
                 if let error = model.error ?? analysis.error { ErrorCard(error) { Task { await load() } } }
                 if let dream = model.dream {
                     HStack(alignment: .firstTextBaseline) {
-                        Hint("\(displayDate(dream.dreamDate)) · \(model.draft?.unsent == true ? "Saved on this device · Waiting to sync" : "Synced")")
+                        Hint(displayDate(dream.dreamDate) + (model.draft?.unsent == true ? " · Waiting to sync" : ""))
                         Spacer()
                         Button("Delete Dream", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet)
                     }
@@ -122,19 +122,24 @@ struct DreamDetailView: View {
                     organizationBlock(dream)
                     Heading("Analysis")
                     analysisBlock(dream)
-                    if let value = analysis.analysis {
-                        DisclosureGroup("Information used for this analysis", isExpanded: $showContext) { contextBlock(value, dream: dream) }.font(.callout).padding(.top, 8)
-                    }
-                    Heading("AI use")
-                    permissionsBlock(dream)
+                    // Sources and the AI switches are kept off the prototype's page until asked for.
+                    DisclosureGroup("More", isExpanded: $showMore) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if let value = analysis.analysis {
+                                Text("Information used for this analysis").font(.callout.weight(.semibold)).padding(.top, 8)
+                                contextBlock(value, dream: dream)
+                            }
+                            Text("AI use").font(.callout.weight(.semibold)).padding(.top, 8)
+                            permissionsBlock(dream)
+                        }
+                    }.font(.callout).padding(.top, 14)
                 } else if model.isLoading { ProgressView("Loading dream…") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(24)
         }
         .dreamPage()
-        .navigationTitle(model.dream?.title ?? "Dream")
-        .navigationBarTitleDisplayMode(.inline)
+        .page(Header(model.dream?.title ?? "Dream", leading: { BackButton() }, trailing: { HomeButton() }))
         .sheet(isPresented: $editing, onDismiss: { Task { await load() } }) {
             NavigationStack { DreamEditorView(id: id, presented: true) }
         }
@@ -216,17 +221,13 @@ struct DreamDetailView: View {
             DisclosureGroup("AI switches", isExpanded: $showSwitches) {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(dreamSwitches, id: \.key) { item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Toggle(item.title, isOn: Binding(get: { dream.permissions[keyPath: item.path] }, set: { on in
-                                if item.key == "history" && !on { confirmingHistoryOff = true }
-                                else { Task { await model.savePermissions(app, [item.key: on]) } }
-                            }))
-                            Hint(item.line)
-                        }
+                        Toggle(item.title, isOn: Binding(get: { dream.permissions[keyPath: item.path] }, set: { on in
+                            if item.key == "history" && !on { confirmingHistoryOff = true }
+                            else { Task { await model.savePermissions(app, [item.key: on]) } }
+                        }))
                     }
                 }.padding(.top, 8)
             }.padding(.vertical, 12)
-            Hint("Reading, searching and editing never need AI permission. Turning AI use off keeps your writing and does not rerun earlier analyses.")
         }
         .font(.callout)
         .disabled(model.isSending)
@@ -245,14 +246,14 @@ struct DreamDetailView: View {
                 Button("Retry summary and tags") { Task { await model.retry(app, task: organize); await analysis.load(app) } }.buttonStyle(.secondary)
             }
             if let organization = dream.organization {
-                Hint(organization.status == .current ? "Up to date" : "Outdated after an edit. A new summary follows.")
+                if organization.status != .current { Hint("Outdated after an edit") }
                 Text(organization.summary).font(.callout)
                 if organization.summaryCorrected { Hint("Your correction") }
                 if organization.status == .current {
                     Button("Correct summary") { correctionText = organization.summary; correcting = .summary }.buttonStyle(.quiet)
                 }
             } else if organize == nil {
-                Hint(dream.permissions.analysis ? "No summary yet." : "Analysis is off for this dream, so no summary or tags are made.")
+                Hint(dream.permissions.analysis ? "No summary yet" : "Analysis is off")
             }
         }
         .disabled(model.isSending)
@@ -276,16 +277,13 @@ struct DreamDetailView: View {
             if let task, task.inProgress {
                 Label(task.type == .organize ? "Preparing the summary and tags first…" : task.type == .transcribe ? "Preparing the transcript first…" : "Preparing the analysis…", systemImage: "hourglass")
                     .font(.callout)
-                Hint("The result appears when you return to this screen or pull to refresh.")
             } else if let task, task.status == .failed {
                 Text(failureText(task)).font(.callout)
                 Button("Retry") { Task { await analysis.retry(app) } }.buttonStyle(.secondary)
             }
             if let value = analysis.analysis {
-                Hint(task?.inProgress == true || value.status != .current ? "Outdated" : "Up to date")
-                if value.sections.isEmpty {
-                    Hint("This analysis has no sections left, because a source it was written with was deleted or excluded.")
-                }
+                if task?.inProgress == true || value.status != .current { Hint("Outdated") }
+                if value.sections.isEmpty { Hint("Its sources were deleted or excluded") }
                 ForEach(Array(value.sections.enumerated()), id: \.offset) { _, section in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(section.kind.heading).font(.callout.weight(.semibold))
@@ -293,14 +291,13 @@ struct DreamDetailView: View {
                         Hint("Sources: \(value.sources(of: section).joined(separator: ", "))")
                     }.padding(.top, 4)
                 }
-                if value.withheld > 0 { Hint("\(value.withheld) part(s) were left out because their sources could not be checked.") }
-                Hint("These are tentative reflections, not diagnoses or established facts.")
+                if value.withheld > 0 { Hint("\(value.withheld) part(s) left out") }
             } else if !dream.permissions.analysis {
-                Hint("Analysis is off for this dream.")
+                Hint("Analysis is off")
             } else if task?.inProgress != true {
-                Hint("No analysis yet.")
+                Hint("No analysis yet")
             }
-            if analysis.analysis != nil && !dream.permissions.analysis { Hint("Analysis is off for this dream.") }
+            if analysis.analysis != nil && !dream.permissions.analysis { Hint("Analysis is off") }
             if dream.permissions.analysis && task?.inProgress != true {
                 // A refresh while the summary waits for the daily limit would buy a weaker analysis; retry that first (wiki 4.6.7).
                 if let organize, organize.limited {
@@ -323,20 +320,18 @@ struct DreamDetailView: View {
                 default: contextRow(entry, link: false)
                 }
             }
-            if value.removedSources > 0 { Hint("\(value.removedSources) source(s) used for this analysis have since been deleted or excluded.") }
+            if value.removedSources > 0 { Hint("\(value.removedSources) source(s) since deleted or excluded") }
             if value.dreamDate != dream.dreamDate || value.mood != dream.mood {
-                Hint("Written for the date \(displayDate(value.dreamDate)) and the mood \(value.mood?.rawValue ?? "not specified").")
+                Hint("Written for \(displayDate(value.dreamDate)) · \(value.mood?.rawValue.capitalized ?? "No mood")")
             }
-            Hint("Inputs, not evidence. Only records you allow are used; life notes and earlier dreams also need “Use life notes and earlier dreams” in Settings.")
         }.padding(.top, 8)
     }
     private func contextRow(_ entry: ContextEntry, link: Bool) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name).font(.callout)
-                if !entry.available { Hint("Changed since this analysis was made") }
-                else if entry.label == "DESC" { Hint("Shown above under Summary") }
-                if let cut = entry.cutTo { Hint("Only its first \(cut) characters were sent.") }
+                if !entry.available { Hint("Changed since this analysis") }
+                if let cut = entry.cutTo { Hint("First \(cut) characters") }
             }
             if link { Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(Color.muted) }
         }

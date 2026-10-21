@@ -18,16 +18,19 @@ struct RootView: View {
                 .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).dreamPage()
             } else if !model.noticeSeen { PrivacyNoticeView() }
             else {
-                // The center tab opens the dream editor over the tabs instead of showing a screen of its own (DreamLog_User_Test.html nav).
-                TabView(selection: Binding(get: { model.tab }, set: { tab in
-                    if tab == .add { model.tab = .journal; model.newDream = EntryRoute(id: newID()) } else { model.tab = tab }
-                })) {
-                    Tab("Journal", systemImage: "list.bullet.rectangle", value: AppTab.journal) { JournalView() }
-                    Tab("Pattern", systemImage: "lightbulb", value: AppTab.patterns) { PatternsView() }
-                    Tab("Add dream", systemImage: "plus", value: AppTab.add) { Color.paper }
-                    Tab("Life notes", systemImage: "pencil", value: AppTab.notes) { NotesView() }
-                    Tab("Settings", systemImage: "gearshape", value: AppTab.settings) { SettingsView() }
+                // The prototype's shell: one screen at a time above its own bottom bar; Home shows at launch and after ⌂.
+                Group {
+                    if model.showingHome { HomeView() }
+                    else {
+                        switch model.tab {
+                        case .journal: JournalView()
+                        case .patterns: PatternsView()
+                        case .notes: NotesView()
+                        case .settings: SettingsView()
+                        }
+                    }
                 }
+                .safeAreaInset(edge: .bottom, spacing: 0) { BottomBar() }
                 .sheet(item: $model.newDream, onDismiss: { model.refreshes += 1 }) { entry in
                     NavigationStack { DreamEditorView(id: entry.id, newEntry: true) }
                 }

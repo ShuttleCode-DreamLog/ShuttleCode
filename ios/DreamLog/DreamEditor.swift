@@ -1,6 +1,7 @@
 import SwiftUI
 
-// The prototype's capture screen: title, the dream text, then date and mood; voice capture is left out until the backend has it.
+// The prototype's capture screen: the title lives in the header and follows the first sentence until renamed; the text,
+// then date and mood below. Voice capture is left out until the backend has it.
 struct DreamEditorView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -8,6 +9,8 @@ struct DreamEditorView: View {
     @State private var model: DreamModel
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
+    @State private var renaming = false
+    @State private var titleDraft = ""
     let newEntry: Bool
     let presented: Bool
 
@@ -36,25 +39,12 @@ struct DreamEditorView: View {
             .padding(24)
         }
         .dreamPage()
+        .page(header)
         .disabled(model.isSending)
-        .navigationTitle(model.draft?.title?.isEmpty == false ? model.draft!.title! : newEntry ? "New dream" : "Dream")
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(model.isEditing || model.isSending)
-        .toolbar {
-            if newEntry || presented || model.isEditing {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { Task { if await model.close(app) { dismiss() } } }.disabled(model.isSending)
-                }
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                if model.isSending { ProgressView() }
-                else if model.isEditing { Button("Revert") { confirmingDiscard = true }.accessibilityIdentifier("revertJournal") }
-                else if model.dream != nil { Button("Edit") { model.isEditing = true } }
-                // Over a dream's screen, Delete Dream stays on that screen (EGMUIUX S03).
-                if !presented, let draft = model.draft {
-                    Button(draft.baseRevision == 0 && !draft.unconfirmed && model.dream == nil ? "Discard draft" : "Delete journal entry", systemImage: "trash", role: .destructive) { confirmingDelete = true }
-                }
-            }
+        .alert("Dream title", isPresented: $renaming) {
+            TextField("Dream title", text: $titleDraft)
+            Button("Save") { let value = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines); model.change(app) { $0.title = value.isEmpty ? nil : value } }
+            Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog("Delete this journal entry and any draft on this phone? This cannot be undone.", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete entry", role: .destructive) { Task { await model.delete(app); if model.deleted { dismiss() } } }
@@ -69,13 +59,37 @@ struct DreamEditorView: View {
         .onChange(of: scenePhase) { _, phase in if phase != .active { Task { await model.close(app) } } }
     }
 
+    private var title: String {
+        if let title = model.draft?.title, !title.isEmpty { return title }
+        return autoTitle(model.draft?.text ?? "") ?? (newEntry ? "New dream" : "Dream")
+    }
+    @ViewBuilder private var header: some View {
+        if model.isEditing {
+            Header(title, onTitle: { titleDraft = model.draft?.title ?? ""; renaming = true }) {
+                BackButton(label: "Done") { Task { if await model.close(app) { dismiss() } } }
+            } trailing: {
+                if model.isSending { ProgressView() } else {
+                    Button("Revert") { confirmingDiscard = true }.buttonStyle(.quiet).accessibilityIdentifier("revertJournal")
+                    // Over a dream's screen, Delete Dream stays on that screen (EGMUIUX S03).
+                    if !presented, let draft = model.draft {
+                        Button { confirmingDelete = true } label: { Image(systemName: "trash").font(.system(size: 20)).foregroundStyle(Color.danger) }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(draft.baseRevision == 0 && !draft.unconfirmed && model.dream == nil ? "Discard draft" : "Delete journal entry")
+                    }
+                }
+            }
+        } else {
+            Header(title) {
+                if newEntry || presented { BackButton(label: "Done") { dismiss() } } else { BackButton() }
+            } trailing: {
+                if model.dream != nil { Button("Edit") { model.isEditing = true }.buttonStyle(.quiet) }
+            }
+        }
+    }
+
     @ViewBuilder private func capture(_ draft: Draft) -> some View {
         Eyebrow("Capture before it fades")
         Text("What do you remember?").font(.display)
-        TextField("Dream title", text: Binding(get: { model.draft?.title ?? "" }, set: { value in model.change(app) { $0.title = value.isEmpty ? nil : value } }))
-            .font(.heading)
-            .accessibilityIdentifier("journalTitle")
-        Hint("Your dream")
         TextEditor(text: Binding(get: { model.draft?.text ?? "" }, set: { value in model.change(app) { $0.text = value } }))
             .font(.callout).scrollContentBackground(.hidden)
             .frame(minHeight: 240).fixedSize(horizontal: false, vertical: true)
@@ -98,8 +112,7 @@ struct DreamEditorView: View {
                 ForEach(Mood.allCases.filter { $0 != .unknown }, id: \.self) { mood in Text(mood.rawValue.capitalized).tag(Optional(mood)) }
             }.labelsHidden()
         }
-        Hint("Kept on this phone as you write and sent when you tap Done. Revert discards your changes.")
-        if draft.unconfirmed { Hint("Not confirmed by the server yet. This is checked when the entry is next loaded or sent.") }
+        if draft.unconfirmed { Hint("Not confirmed by the server yet") }
         if draft.conflict {
             VStack(alignment: .leading, spacing: 10) {
                 Text("The stored entry changed").font(.heading)

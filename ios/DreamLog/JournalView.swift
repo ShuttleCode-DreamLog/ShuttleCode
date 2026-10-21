@@ -1,6 +1,5 @@
 import SwiftUI
 
-// The Journal root carries the prototype's Home (hero, latest dream, mood bubbles) above its Journal list.
 struct JournalView: View {
     @Environment(AppModel.self) private var app
     @State private var model = JournalModel()
@@ -11,12 +10,6 @@ struct JournalView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 13) {
-                    Eyebrow("A little space for your inner world")
-                    PageHeading("Your dreams, connected.", lede: "Notice what stays with you.")
-                    if model.filter.isEmpty, let latest = model.rows.first(where: { $0.item != nil }) { latestCard(latest) }
-                    moodBubbles
-                    Button("Type a dream") { app.newDream = EntryRoute(id: newID()) }
-                        .buttonStyle(.primaryWide).accessibilityIdentifier("typeDream")
                     HStack(spacing: 10) {
                         TextField("Search dreams…", text: $query).field().submitLabel(.search).onSubmit(search)
                         Button("Filter") { filtering = true }.buttonStyle(.secondary)
@@ -26,8 +19,7 @@ struct JournalView: View {
                     }
                     Hint(countLine)
                     if model.rows.isEmpty && !model.isLoading {
-                        EmptyCard(title: model.filter.isEmpty ? "No dreams yet" : "No recorded dream matches",
-                                  text: model.filter.isEmpty ? "Tap Type a dream to keep your first dream." : "Clear the search or filters to see every dream.")
+                        EmptyCard(model.filter.isEmpty ? "No dreams yet" : "No recorded dream matches")
                     }
                     ForEach(model.rows) { row in
                         NavigationLink(value: row.opensEditor ? Route.draft(row.id) : Route.dream(row.id)) { DreamCard(row: row) }.buttonStyle(.plain)
@@ -43,8 +35,7 @@ struct JournalView: View {
                 .padding(24)
             }
             .dreamPage()
-            .navigationTitle("DreamLog")
-            .navigationBarTitleDisplayMode(.inline)
+            .page(Header("Journal") { HomeButton() })
             .routeDestinations()
             .sheet(isPresented: $filtering) { JournalFilterSheet(model: model) }
             .reloadable { await model.load(app) }
@@ -60,52 +51,18 @@ struct JournalView: View {
                 model.filter.tag = requested
                 if path.isEmpty { Task { await model.load(app) } } else { path = [] }
             }
+            .onChange(of: app.requestedMood, initial: true) { _, requested in
+                guard let requested else { return }
+                app.requestedMood = nil
+                model.filter.mood = requested
+                if path.isEmpty { Task { await model.load(app) } } else { path = [] }
+            }
         }
     }
     private func search() {
         guard !model.isLoading else { return }
         model.filter.query = query
         Task { await model.load(app) }
-    }
-    private func latestCard(_ row: JournalRow) -> some View {
-        NavigationLink(value: Route.dream(row.id)) {
-            VStack(alignment: .leading, spacing: 8) {
-                Eyebrow(row.date == journalDate() ? "Today's dream" : "Latest dream")
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(row.title).font(.heading)
-                        if !row.preview.isEmpty { Text(row.preview).font(.callout).foregroundStyle(Color.muted).lineLimit(3) }
-                    }
-                    Spacer(minLength: 0)
-                    Text(glyph(row.item?.mood)).font(.glyph).foregroundStyle(Color.motif)
-                }
-            }
-            .multilineTextAlignment(.leading)
-            .card()
-        }.buttonStyle(.plain)
-    }
-    // The prototype's theme bubbles: the feelings in the loaded dreams, sized by how often they occur; a tap filters by that mood.
-    @ViewBuilder private var moodBubbles: some View {
-        let counts = model.items.reduce(into: [Mood: Int]()) { if let mood = $1.mood, mood != .unknown { $0[mood, default: 0] += 1 } }
-        let shown = counts.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key.rawValue < $1.key.rawValue }.prefix(4)
-        if let largest = shown.first?.value {
-            Wrap(spacing: 12) {
-                ForEach(shown, id: \.key) { entry in
-                    let chosen = model.filter.mood == entry.key
-                    let size = 72 + 40 * CGFloat(entry.value) / CGFloat(largest)
-                    Button {
-                        model.filter.mood = chosen ? nil : entry.key
-                        Task { await model.load(app) }
-                    } label: {
-                        Text(entry.key.rawValue.capitalized).font(.system(size: 18, design: .serif)).foregroundStyle(Color.ink)
-                            .frame(width: size, height: size)
-                            .background(Circle().fill(chosen ? Color.soft : Color.soft.opacity(0.6)))
-                            .overlay(Circle().strokeBorder(chosen ? Color.sage : Color.bubble, lineWidth: chosen ? 2 : 1))
-                    }
-                    .accessibilityLabel("\(entry.key.rawValue.capitalized), \(entry.value) dreams\(chosen ? ", selected" : "")")
-                }
-            }
-        }
     }
     private var countLine: String {
         let count = model.rows.count
@@ -118,6 +75,7 @@ struct JournalView: View {
     }
 }
 
+// The prototype's dream card: date, title, tag pills, summary and a motif.
 struct DreamCard: View {
     let row: JournalRow
     var body: some View {
@@ -126,10 +84,14 @@ struct DreamCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 if !row.date.isEmpty { Hint(shortDate(row.date)) }
                 Text(row.title).font(.heading)
-                if let mood, mood != .unknown { Pill(mood.rawValue.capitalized) }
+                if !row.tags.isEmpty {
+                    Wrap(spacing: 4) { ForEach(row.tags.prefix(4), id: \.self) { Pill($0.text) } }
+                } else if let mood, mood != .unknown { Pill(mood.rawValue.capitalized) }
                 if !row.preview.isEmpty { Text(row.preview).font(.callout).foregroundStyle(Color.muted).lineLimit(3) }
-                Text(row.statusText).font(.caption2)
-                    .foregroundStyle(row.status == .needsAttention || row.draft?.conflict == true ? Color.danger : Color.muted)
+                if row.status != .saved {
+                    Text(row.statusText).font(.caption2)
+                        .foregroundStyle(row.status == .needsAttention || row.draft?.conflict == true ? Color.danger : Color.muted)
+                }
             }
             Spacer(minLength: 0)
             Text(glyph(mood)).font(.glyph).foregroundStyle(Color.motif)
@@ -151,15 +113,13 @@ struct JournalFilterSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 13) {
-                    PageHeading("Filter dreams", lede: "Narrow the journal by feeling, tag or date.")
                     LabeledRow("Feeling") {
                         Picker("Feeling", selection: $mood) {
                             Text("Any").tag(Mood?.none)
                             ForEach(Mood.allCases.filter { $0 != .unknown }, id: \.self) { Text($0.rawValue.capitalized).tag(Optional($0)) }
                         }.labelsHidden()
                     }
-                    Hint("Tag")
-                    TextField("For example bridge", text: $tag).field().autocorrectionDisabled().textInputAutocapitalization(.never)
+                    TextField("Tag", text: $tag).field().autocorrectionDisabled().textInputAutocapitalization(.never)
                     dateRow("From", date: $fromDate)
                     dateRow("To", date: $toDate)
                     HStack(spacing: 10) {
@@ -172,9 +132,7 @@ struct JournalFilterSheet: View {
                 .padding(24)
             }
             .dreamPage()
-            .navigationTitle("Filter")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .page(Header("Filter dreams", leading: { BackButton(label: "Cancel") }, trailing: { EmptyView() }))
             .onAppear {
                 mood = model.filter.mood; tag = model.filter.tag ?? ""
                 fromDate = model.filter.fromDate.map(journalDay); toDate = model.filter.toDate.map(journalDay)

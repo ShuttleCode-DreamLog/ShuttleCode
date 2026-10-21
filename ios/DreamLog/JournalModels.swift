@@ -106,6 +106,8 @@ nonisolated enum ServerStatus: String, Codable, Sendable {
     init(from decoder: any Decoder) throws { self = ServerStatus(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
 }
 
+nonisolated struct ItemTag: Codable, Sendable, Hashable { var category: TagCategory; var text: String }
+
 nonisolated struct JournalItem: Codable, Sendable, Identifiable {
     var id: String
     var dreamDate: String
@@ -115,6 +117,8 @@ nonisolated struct JournalItem: Codable, Sendable, Identifiable {
     var audioStatus: String
     var preview: String
     var summary: String?
+    // Optional until every server has been deployed with it (SkeletalContracts.md, working agreement 3).
+    var tags: [ItemTag]?
     var status: ServerStatus
     var favoriteVisualId: String?
     var updatedAt: Date
@@ -207,4 +211,11 @@ nonisolated struct JournalRow: Identifiable {
     var title: String { draft?.title ?? item?.title ?? "Untitled dream" }
     var preview: String { draft?.text ?? item?.summary ?? item?.preview ?? "" }
     var date: String { draft?.dreamDate ?? item?.dreamDate ?? "" }
+    var tags: [ItemTag] { item?.tags ?? [] }
+}
+
+// The prototype names a dream by its first sentence until the user renames it.
+nonisolated func autoTitle(_ text: String) -> String? {
+    let sentence = text.split(omittingEmptySubsequences: true) { ".!?\n".contains($0) }.first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    return sentence.isEmpty ? nil : String(sentence.prefix(48))
 }

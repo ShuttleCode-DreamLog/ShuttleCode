@@ -124,6 +124,7 @@ final class DreamModel {
             }
         }
         guard var sending = draft, !sending.conflict, !missing else { return }
+        if sending.title?.isEmpty ?? true { sending.title = autoTitle(sending.text) }
         let length = sending.text.unicodeScalars.count
         guard !sending.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               (length <= app.limits.maxDreamChars || length <= (dream?.text.unicodeScalars.count ?? 0)),

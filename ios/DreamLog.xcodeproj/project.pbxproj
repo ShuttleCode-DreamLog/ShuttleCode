@@ -5,16 +5,6 @@
 	};
 	objectVersion = 71;
 	objects = {
-        000000000000000000000030 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = DreamLogUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-        000000000000000000000031 = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = DreamLogUITests; sourceTree = "<group>"; };
-        000000000000000000000032 = {isa = PBXNativeTarget; buildConfigurationList = 000000000000000000000036; buildPhases = (000000000000000000000033,000000000000000000000034,000000000000000000000035); buildRules = (); dependencies = (000000000000000000000011); fileSystemSynchronizedGroups = (000000000000000000000031); name = DreamLogUITests; productName = DreamLogUITests; productReference = 000000000000000000000030; productType = "com.apple.product-type.bundle.ui-testing"; };
-        000000000000000000000033 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-        000000000000000000000034 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-        000000000000000000000035 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-        000000000000000000000036 = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000037,000000000000000000000038); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-        000000000000000000000037 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = edu.umich.dreamlog.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = DreamLog; }; name = Debug; };
-        000000000000000000000038 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = edu.umich.dreamlog.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = DreamLog; }; name = Release; };
-
 
 /* Begin PBXContainerItemProxy section */
 		000000000000000000000010 /* PBXContainerItemProxy */ = {
@@ -29,11 +19,13 @@
 /* Begin PBXFileReference section */
 		000000000000000000000006 /* DreamLog.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DreamLog.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000007 /* DreamLogTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DreamLogTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000030 /* DreamLogUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = DreamLogUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		000000000000000000000004 /* DreamLog */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = DreamLog; sourceTree = "<group>"; };
 		000000000000000000000005 /* DreamLogTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = DreamLogTests; sourceTree = "<group>"; };
+		000000000000000000000031 /* DreamLogUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = DreamLogUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,6 +43,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		000000000000000000000034 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -59,7 +58,7 @@
 			children = (
 				000000000000000000000004 /* DreamLog */,
 				000000000000000000000005 /* DreamLogTests */,
-                000000000000000000000031 /* DreamLogUITests */,
+				000000000000000000000031 /* DreamLogUITests */,
 				000000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -69,7 +68,7 @@
 			children = (
 				000000000000000000000006 /* DreamLog.app */,
 				000000000000000000000007 /* DreamLogTests.xctest */,
-                000000000000000000000030 /* DreamLogUITests.xctest */,
+				000000000000000000000030 /* DreamLogUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -122,6 +121,27 @@
 			productReference = 000000000000000000000007 /* DreamLogTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		000000000000000000000032 /* DreamLogUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000000036 /* Build configuration list for PBXNativeTarget "DreamLogUITests" */;
+			buildPhases = (
+				000000000000000000000033 /* Sources */,
+				000000000000000000000034 /* Frameworks */,
+				000000000000000000000035 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				000000000000000000000011 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				000000000000000000000031 /* DreamLogUITests */,
+			);
+			name = DreamLogUITests;
+			productName = DreamLogUITests;
+			productReference = 000000000000000000000030 /* DreamLogUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -155,7 +175,7 @@
 			targets = (
 				000000000000000000000008 /* DreamLog */,
 				000000000000000000000009 /* DreamLogTests */,
-                000000000000000000000032 /* DreamLogUITests */,
+				000000000000000000000032 /* DreamLogUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -175,6 +195,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		000000000000000000000035 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -186,6 +213,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		00000000000000000000000D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000033 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -304,6 +338,30 @@
 			};
 			name = Release;
 		};
+		000000000000000000000037 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = edu.umich.dreamlog.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = DreamLog;
+			};
+			name = Debug;
+		};
+		000000000000000000000038 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = edu.umich.dreamlog.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = DreamLog;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -330,6 +388,15 @@
 			buildConfigurations = (
 				000000000000000000000019 /* Debug */,
 				00000000000000000000001A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		000000000000000000000036 /* Build configuration list for PBXNativeTarget "DreamLogUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000000000037 /* Debug */,
+				000000000000000000000038 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

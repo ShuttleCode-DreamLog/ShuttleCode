@@ -25,14 +25,15 @@ final class ScreensTests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         let acknowledge = app.buttons["I acknowledge this notice"]
-        if app.navigationBars["Privacy notice"].waitForExistence(timeout: 5) {
+        if app.staticTexts["Privacy notice"].waitForExistence(timeout: 5) {
             for _ in 0..<5 where !(acknowledge.exists && acknowledge.isHittable) { app.swipeUp() }
             acknowledge.tap()
         }
         XCTAssertTrue(app.buttons["typeDream"].waitForExistence(timeout: 15))
-        sleep(2)
+        sleep(3)
+        snapshot(app, "S00 Home")
         var seeded = false
-        app.tabBars.buttons["Life notes"].tap()
+        app.buttons["tab_notes"].tap()
         let note = "Crossing the old bridge on my way to the presentation tomorrow."
         if !app.staticTexts[note].waitForExistence(timeout: 5) {
             app.buttons["addNote"].tap()
@@ -44,13 +45,18 @@ final class ScreensTests: XCTestCase {
             app.buttons["Done"].tap()
             seeded = true
         }
+        XCTAssertTrue(app.staticTexts[note].waitForExistence(timeout: 10))
         snapshot(app, "S07 Life Notes")
-        app.tabBars.buttons["Journal"].tap()
+        app.buttons["tab_journal"].tap()
         for (title, text) in samples where !app.staticTexts[title].waitForExistence(timeout: 3) {
-            app.buttons["typeDream"].tap()
-            let titleField = app.textFields["journalTitle"]
-            XCTAssertTrue(titleField.waitForExistence(timeout: 5))
-            titleField.tap(); titleField.typeText(title)
+            app.buttons["tab_add"].tap()
+            let titleButton = app.buttons["dreamTitle"]
+            XCTAssertTrue(titleButton.waitForExistence(timeout: 5))
+            titleButton.tap()
+            let titleField = app.alerts.textFields.firstMatch
+            XCTAssertTrue(titleField.waitForExistence(timeout: 3))
+            titleField.typeText(title)
+            app.alerts.buttons["Save"].tap()
             let body = app.textViews["journalText"]
             body.tap(); body.typeText(text)
             app.buttons["Done"].tap()
@@ -62,7 +68,7 @@ final class ScreensTests: XCTestCase {
         refresh(app)
         snapshot(app, "S01 Journal")
         app.buttons["Filter"].tap()
-        XCTAssertTrue(app.navigationBars["Filter"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Filter dreams"].waitForExistence(timeout: 3))
         snapshot(app, "S01 Journal filters")
         app.buttons["Cancel"].tap()
 
@@ -70,14 +76,14 @@ final class ScreensTests: XCTestCase {
         XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 10))
         sleep(3)
         snapshot(app, "S03 Dream Detail 1")
-        for page in 2...5 {
+        for page in 2...4 {
             app.swipeUp()
             sleep(1)
             snapshot(app, "S03 Dream Detail \(page)")
         }
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["Back"].firstMatch.tap()
 
-        app.tabBars.buttons["Pattern"].tap()
+        app.buttons["tab_patterns"].tap()
         sleep(4)
         refresh(app)
         snapshot(app, "S06 Patterns")
@@ -91,16 +97,16 @@ final class ScreensTests: XCTestCase {
             correct.tap()
             sleep(1)
             snapshot(app, "S06 Correct this pattern")
-            app.swipeUp()
-            snapshot(app, "S06 Correct this pattern 2")
-            app.navigationBars.buttons.element(boundBy: 0).tap()
+            app.buttons["Back"].firstMatch.tap()
         }
         app.buttons["Garden"].tap()
         sleep(1)
         snapshot(app, "S10 Garden")
 
-        app.tabBars.buttons["Settings"].tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        app.buttons["tab_settings"].tap()
+        XCTAssertTrue(app.staticTexts["Make space your way."].waitForExistence(timeout: 5))
         snapshot(app, "S08 Settings")
+        app.buttons["Home"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["typeDream"].waitForExistence(timeout: 5))
     }
 }

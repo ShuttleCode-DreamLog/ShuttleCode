@@ -3,7 +3,7 @@ import Network
 import Observation
 import UserNotifications
 
-nonisolated enum AppTab: Hashable { case journal, patterns, add, notes, settings }
+nonisolated enum AppTab: Hashable { case journal, patterns, notes, settings }
 
 @MainActor @Observable
 final class AppModel {
@@ -19,12 +19,16 @@ final class AppModel {
     var streamInProgress = false
     var recording = false
     var tab = AppTab.journal
-    // The Add dream tab and Type a dream present this editor over the tabs (DreamLog_User_Test.html).
+    // Home shows in place of the selected tab at launch and after ⌂; a bar tap leaves it (DreamLog_User_Test.html nav).
+    var showingHome = true
+    var homeVisits = 0
+    // The bar's + and Type a dream present this editor over the screen.
     var newDream: EntryRoute?
     // Raised when the app returns to the foreground, the connection returns or the editor over the tabs closes; open screens run load() on it (wiki 4.4.6).
     var refreshes = 0
-    // Set by "Show dreams with this tag" on a dream's screen; the journal takes it over as its filter.
+    // Set by "Show dreams with this tag" on a dream's screen or a mood bubble on Home; the journal takes it over as its filter.
     var requestedTag: String?
+    var requestedMood: Mood?
     // Dreams open in an editor; the queued-dream resend leaves their drafts to that editor.
     var editing: Set<String> = []
     var isBusy: Bool { recording || streamInProgress || savingSettings }
@@ -84,7 +88,15 @@ final class AppModel {
     }
     func showJournal(tag: String) {
         requestedTag = tag
-        tab = .journal
+        tab = .journal; showingHome = false
+    }
+    func showJournal(mood: Mood) {
+        requestedMood = mood
+        tab = .journal; showingHome = false
+    }
+    func goHome() {
+        showingHome = true
+        homeVisits += 1
     }
     func watchConnection() async {
         var offline = false
