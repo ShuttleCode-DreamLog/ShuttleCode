@@ -102,8 +102,18 @@ async def summaries(identity, dreams):
     return {row['dream_id']: row['corrected'] or msgspec.json.decode(row['content'])['summary'] for row in found}
 
 
-def journal_item(row, status, summary):
-    return {**{key: row[key] for key in ('id', 'dream_date', 'title', 'mood', 'revision', 'audio_status', 'updated_at')}, 'preview': row['text'][:200], 'summary': summary, 'status': status, 'favorite_visual_id': None}
+async def tag_lists(identity, dreams):
+    # The current organization's effective tags, in the order they were found; a removed tag is left out by the view.
+    ids = [row['id'] for row in dreams]
+    found = await db.rwdb.execute_fetchall(f"SELECT dream_id,category,text FROM effective_tags WHERE user_id=? AND output_status='current' AND dream_id IN ({','.join('?' * len(ids))}) ORDER BY position", (identity, *ids)) if ids else []
+    lists = {}
+    for row in found:
+        lists.setdefault(row['dream_id'], []).append({'category': row['category'], 'text': row['text']})
+    return lists
+
+
+def journal_item(row, status, summary, tags):
+    return {**{key: row[key] for key in ('id', 'dream_date', 'title', 'mood', 'revision', 'audio_status', 'updated_at')}, 'preview': row['text'][:200], 'summary': summary, 'tags': tags, 'status': status, 'favorite_visual_id': None}
 
 
 async def owned_dream(identity, dream_id):
@@ -290,8 +300,8 @@ async def page(request, identity, filters):
         clauses.append("EXISTS(SELECT 1 FROM effective_tags t WHERE t.dream_id=d.id AND t.user_id=d.user_id AND t.text=? AND t.output_status='current')")
         values.append(' '.join(filters.tag.lower().split()))
     rows = await db.rwdb.execute_fetchall(f"SELECT d.* FROM dreams d WHERE {' AND '.join(clauses)} ORDER BY d.dream_date DESC,d.created_at DESC,d.id ASC LIMIT ? OFFSET ?", (*values, limit + 1, offset))
-    statuses, found = await tasks.journal_statuses(identity, rows[:limit]), await summaries(identity, rows[:limit])
-    return json_response({'items': [journal_item(row, statuses[row['id']], found.get(row['id'])) for row in rows[:limit]], 'has_more': len(rows) > limit})
+    statuses, found, tags = await tasks.journal_statuses(identity, rows[:limit]), await summaries(identity, rows[:limit]), await tag_lists(identity, rows[:limit])
+    return json_response({'items': [journal_item(row, statuses[row['id']], found.get(row['id']), tags.get(row['id'], [])) for row in rows[:limit]], 'has_more': len(rows) > limit})
 
 
 async def list_dreams(request):

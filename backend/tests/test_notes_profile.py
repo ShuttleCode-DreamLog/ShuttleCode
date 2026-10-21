@@ -13,19 +13,21 @@ def note(text='Invented life note: preparing for exams.', **fields):
 
 async def test_notes_create_read_repeat_edit_list_delete(client):
     headers, path = credential(), f'/v1/memories/{uuid4()}'
-    created = await client.put(path, headers=headers, json=note())
+    created = await client.put(path, headers=headers, json=note(title='  Exam week '))
     assert created.status_code == 201
     first = created.json()['memory']
-    assert first['revision'] == 1 and first['event_date'] is None and first['event_precision'] == 'unknown'
-    assert (await client.put(path, headers=headers, json=note())).json()['memory'] == first
+    assert first['revision'] == 1 and first['title'] == 'Exam week' and first['event_date'] is None and first['event_precision'] == 'unknown'
+    assert (await client.put(path, headers=headers, json=note(title='Exam week'))).json()['memory'] == first
     assert (await client.get(path, headers=headers)).json()['memory'] == first
     edited = (await client.put(path, headers=headers, json=note('Exam finished.', base_revision=1, event_date='2026-10-08', event_precision='exact', is_ongoing=True))).json()['memory']
-    assert edited['revision'] == 2 and edited['recorded_at'] == first['recorded_at']
+    assert edited['revision'] == 2 and edited['recorded_at'] == first['recorded_at'] and edited['title'] == 'Exam week'
     assert edited['event_precision'] == 'exact' and edited['is_ongoing']
     assert (await client.get('/v1/memories?ongoing=true', headers=headers)).json()['items'] == [edited]
     assert not (await client.get('/v1/memories?ongoing=false', headers=headers)).json()['items']
-    cleared = await client.put(path, headers=headers, json=note('Exam finished.', base_revision=2, event_date=None, event_precision='unknown'))
-    assert cleared.status_code == 200 and cleared.json()['memory']['event_date'] is None
+    retitled = (await client.put(path, headers=headers, json=note('Exam finished.', base_revision=2, title='Done'))).json()['memory']
+    assert retitled['revision'] == 3 and retitled['title'] == 'Done' and retitled['event_date'] == '2026-10-08'
+    cleared = await client.put(path, headers=headers, json=note('Exam finished.', base_revision=3, title='', event_date=None, event_precision='unknown'))
+    assert cleared.status_code == 200 and cleared.json()['memory']['event_date'] is None and cleared.json()['memory']['title'] is None
     assert (await client.delete(path, headers=headers)).status_code == 204
     assert (await client.get(path, headers=headers)).status_code == 404
     assert (await client.delete(path, headers=headers)).status_code == 404
@@ -47,7 +49,7 @@ async def test_notes_owner_collision_conflict_and_permission(client):
     assert (await client.put(f'/v1/memories/{uuid4()}', headers=first, json=note(base_revision=1))).status_code == 404
 
 
-@pytest.mark.parametrize('fields,status', [({'text':'   '},400), ({'text':'x'*2001},413), ({'base_revision':True},400), ({'base_revision':-1},400), ({'event_date':'2026-02-30'},400), ({'event_date':'2026-10-08','event_precision':'unknown'},400), ({'event_precision':'exact'},400), ({'is_ongoing':1},400), ({'allow_analysis':'yes'},400)])
+@pytest.mark.parametrize('fields,status', [({'text':'   '},400), ({'text':'x'*2001},413), ({'title':'x'*121},413), ({'title':5},400), ({'base_revision':True},400), ({'base_revision':-1},400), ({'event_date':'2026-02-30'},400), ({'event_date':'2026-10-08','event_precision':'unknown'},400), ({'event_precision':'exact'},400), ({'is_ongoing':1},400), ({'allow_analysis':'yes'},400)])
 async def test_notes_validation(client, fields, status):
     assert (await client.put(f'/v1/memories/{uuid4()}', headers=credential(), json=note(**fields))).status_code == status
 
@@ -84,13 +86,15 @@ async def test_new_routes_require_bearer(client):
         assert (await client.request(method,path,json=note())).status_code == 401
 
 
-@pytest.mark.parametrize('version', [1, 2, 3, 4])
+@pytest.mark.parametrize('version', [1, 2, 3, 4, 5])
 async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     path = tmp_path / 'v1.db'
     connection = sqlite3.connect(path)
     schema = Path(db.__file__).with_name('schema.sql').read_text()
     connection.executescript(schema)
-    connection.execute('DROP TABLE dream_vectors')
+    connection.execute('ALTER TABLE memories DROP COLUMN title')
+    if version <= 4:
+        connection.execute('DROP TABLE dream_vectors')
     if version <= 3:
         connection.execute('DROP VIEW current_occurrences')
         for table in ('pattern_separations', 'pattern_corrections', 'pattern_memberships', 'pattern_groups', 'occurrences'):
@@ -103,13 +107,15 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     dream_id = str(uuid4())
     connection.execute('INSERT INTO users(id,created_at) VALUES(?,?)', (identity,1))
     connection.execute("INSERT INTO dreams(id,user_id,text,dream_date,source,created_at,updated_at) VALUES(?,?,?,'2026-10-08','text',1,1)", (dream_id,identity,'Kept sample'))
+    connection.execute("INSERT INTO memories(id,user_id,text,recorded_at,event_precision,updated_at) VALUES(?,?,'Kept note',1,'unknown',1)", (str(uuid4()),identity))
     connection.execute(f'PRAGMA user_version={version}')
     connection.commit()
     connection.close()
     upgraded = await db.open_database(path)
     try:
-        assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == 5
+        assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == 6
         assert (await upgraded.execute_fetchall('SELECT text FROM dreams WHERE id=?',(dream_id,)))[0][0] == 'Kept sample'
+        assert [tuple(row) for row in await upgraded.execute_fetchall('SELECT title,text FROM memories')] == [(None, 'Kept note')]
         assert not await upgraded.execute_fetchall('SELECT * FROM profiles')
         assert not await upgraded.execute_fetchall('SELECT * FROM pattern_groups')
         assert not await upgraded.execute_fetchall('SELECT * FROM dream_vectors')

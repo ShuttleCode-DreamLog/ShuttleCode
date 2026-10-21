@@ -40,7 +40,7 @@ Success: 201 on creation, 200 on update/repeat, `{"dream":{…}}`. The object co
 
 Search: `POST /v1/dreams/search` with `{"query":"lake"}`. Optional mood, from_date, to_date and tag filters can be combined. This is literal case-insensitive SQLite title/text matching (non-ASCII case folding is limited); `%` and `_` are literal characters. Search text is sent in the body, not the URL. `tag` matches a dream's current tags after normalization (trimmed, lower case, single spaces), including the user's corrections. Unsent local drafts are not server search results.
 
-Journal list items contain id, dream_date, title, mood, revision, audio_status, preview, summary, status, favorite_visual_id and updated_at. `summary` is the current organization's summary, or null; `favorite_visual_id` is null in this build.
+Journal list items contain id, dream_date, title, mood, revision, audio_status, preview, summary, tags, status, favorite_visual_id and updated_at. `summary` is the current organization's summary, or null; `tags` are its effective tags as `{"category","text"}` in the order they were found, with the user's corrections applied and removed tags left out, or `[]`; `favorite_visual_id` is null in this build.
 
 ## Dream permissions
 
@@ -59,6 +59,7 @@ Notes use the wiki's memory contract:
 ```json
 {
   "base_revision": 0,
+  "title": "Exam week",
   "text": "Invented life note: preparing for exams.",
   "event_date": null,
   "event_precision": "unknown",
@@ -67,9 +68,9 @@ Notes use the wiki's memory contract:
 }
 ```
 
-Required: base_revision and text, at most 2,000 characters. Text may be empty for a photo note; whitespace-only text is rejected. A note without a date uses null + unknown. A dated note uses exact or approximate. New notes default to no date, not ongoing and analysis allowed; a supplied date defaults to exact. On editing, omitted optional fields retain their values: send both date and precision when changing/removing a date. checkin_id is read-only and cannot be set by this endpoint.
+Required: base_revision and text, at most 2,000 characters. Text may be empty for a photo note; whitespace-only text is rejected. Optional title, at most 120 characters: omission preserves it, null or blank clears it (schema version 6). A note without a date uses null + unknown. A dated note uses exact or approximate. New notes default to no date, not ongoing and analysis allowed; a supplied date defaults to exact. On editing, omitted optional fields retain their values: send both date and precision when changing/removing a date. checkin_id is read-only and cannot be set by this endpoint.
 
-Success: 201 on creation, 200 on update/repeat, `{"memory":{…}}`. Its fields are id, text, recorded_at, event_date, event_precision, is_ongoing, allow_analysis, checkin_id, revision, updated_at and photos. recorded_at never changes. A change to text/date/precision/ongoing raises the revision. A permission-only change keeps it. On a stale content edit, 409 preserves the content but applies an explicitly supplied analysis permission; reload before resolving the conflict. With it on, and the account's history switch on, the note can be context for dream analyses; turning it off removes the analysis sections that cited the note and marks those analyses `outdated`, while a content change only marks them `outdated`. Neither starts an AI call.
+Success: 201 on creation, 200 on update/repeat, `{"memory":{…}}`. Its fields are id, title, text, recorded_at, event_date, event_precision, is_ongoing, allow_analysis, checkin_id, revision, updated_at and photos. recorded_at never changes. A change to title/text/date/precision/ongoing raises the revision. A permission-only change keeps it. On a stale content edit, 409 preserves the content but applies an explicitly supplied analysis permission; reload before resolving the conflict. With it on, and the account's history switch on, the note can be context for dream analyses; turning it off removes the analysis sections that cited the note and marks those analyses `outdated`, while a content change only marks them `outdated`. Neither starts an AI call.
 
 ## Note photos
 

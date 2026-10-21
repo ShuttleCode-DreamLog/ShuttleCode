@@ -121,6 +121,7 @@ async def test_organize_saves_checked_summary_and_tags(client, clock, gemini, ca
     assert organization['tags'][0] == {'category': 'place', 'text': 'blue lake', 'original_text': 'blue lake', 'excerpt': 'the “Blue  Lake”', 'feeling': None, 'corrected': False, 'removed': False}
     item_row = (await client.get('/v1/dreams', headers=headers)).json()['items'][0]
     assert (item_row['summary'], item_row['status']) == (SUMMARY, 'processing')
+    assert item_row['tags'] == [{'category': 'place', 'text': 'blue lake'}, {'category': 'person', 'text': 'teacher'}, {'category': 'emotion', 'text': 'calm'}, {'category': 'emotion', 'text': 'fear'}]
     assert [(t['request_key'], t['status']) for t in await db.rwdb.execute_fetchall("SELECT request_key,status FROM tasks WHERE dream_id=? AND type='analyze'", (dream_id,))] == [(f'analyze:{dream_id}:1:initial', 'waiting')]
     assert [i['id'] for i in (await client.post('/v1/dreams/search', headers=headers, json={'tag': ' Blue  LAKE '})).json()['items']] == [dream_id]
     assert (await client.post('/v1/dreams/search', headers=headers, json={'tag': 'bell'})).json()['items'] == []
@@ -223,7 +224,8 @@ async def test_new_revision_outdates_then_replaces_the_organization(client, cloc
     await client.put(f'/v1/dreams/{dream_id}', headers=headers, json={'base_revision': 1, 'text': 'A second invented account by the sea.', 'dream_date': '2026-10-08'})
     old = (await dream(client, headers, dream_id))['organization']
     assert (old['status'], old['dream_revision'], old['summary']) == ('outdated', 1, SUMMARY)
-    assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['summary'] is None
+    outdated_item = (await client.get('/v1/dreams', headers=headers)).json()['items'][0]
+    assert outdated_item['summary'] is None and outdated_item['tags'] == []
     assert (await client.post('/v1/dreams/search', headers=headers, json={'tag': 'lake'})).json()['items'] == []
     gemini.answers.append({'summary': 'By the sea.', 'items': [item('place', 'sea', 'the sea')]})
     assert await tasks.run_once()

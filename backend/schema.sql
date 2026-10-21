@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS discussion_corrections (
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT,
     text TEXT NOT NULL,
     recorded_at INTEGER NOT NULL,
     event_date TEXT,
@@ -314,7 +315,7 @@ DROP VIEW IF EXISTS effective_tags;
 CREATE VIEW effective_tags AS
 SELECT t.id AS tag_id,t.dream_id,t.user_id,t.output_id,t.category,t.excerpt,
        COALESCE(c.text,t.text) AS text,t.feeling,(c.output_id IS NOT NULL) AS corrected,
-       t.text AS original_text,o.status AS output_status
+       t.text AS original_text,o.status AS output_status,t.rowid AS position
 FROM tags t JOIN outputs o ON o.id=t.output_id
 LEFT JOIN org_corrections c ON c.output_id=t.output_id AND c.category=t.category AND c.original_text=t.text
 WHERE COALESCE(c.text,t.text)<>'';

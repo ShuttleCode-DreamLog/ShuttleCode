@@ -11,6 +11,7 @@ from web import RequestError, check_id, json_response, read_body, resolve_user
 class MemorySave(msgspec.Struct, kw_only=True):
     base_revision: int
     text: str
+    title: str | None | msgspec.UnsetType = msgspec.UNSET
     event_date: str | None | msgspec.UnsetType = msgspec.UNSET
     event_precision: str | msgspec.UnsetType = msgspec.UNSET
     is_ongoing: bool | msgspec.UnsetType = msgspec.UNSET
@@ -18,7 +19,7 @@ class MemorySave(msgspec.Struct, kw_only=True):
 
 
 def memory_value(row):
-    return {**{key: row[key] for key in ('id', 'text', 'recorded_at', 'event_date', 'event_precision', 'checkin_id', 'revision', 'updated_at')}, 'is_ongoing': bool(row['is_ongoing']), 'allow_analysis': bool(row['allow_analysis'])}
+    return {**{key: row[key] for key in ('id', 'title', 'text', 'recorded_at', 'event_date', 'event_precision', 'checkin_id', 'revision', 'updated_at')}, 'is_ongoing': bool(row['is_ongoing']), 'allow_analysis': bool(row['allow_analysis'])}
 
 
 async def owned_memory(identity, memory_id):
@@ -63,12 +64,15 @@ async def save_memory(request):
         raise RequestError(400, 'invalid_request', 'Use a nonnegative revision; text cannot consist only of whitespace.')
     if len(body.text) > config.LIMITS['max_memory_chars']:
         raise RequestError(413, 'too_large', 'Note text is too long.')
+    if body.title is not msgspec.UNSET and body.title is not None and len(body.title) > config.LIMITS['max_title_chars']:
+        raise RequestError(413, 'too_large', 'Note title is too long.')
     conflict = None
     async with db.tx() as connection:
         rows = await connection.execute_fetchall('SELECT * FROM memories WHERE id=? AND user_id=?', (memory_id, identity))
         stored = rows[0] if rows else None
         if stored is None and body.base_revision > 0:
             raise RequestError(404, 'not_found', 'Note not found.')
+        title = (stored['title'] if stored else None) if body.title is msgspec.UNSET else (body.title.strip() or None) if body.title is not None else None
         event_date = (stored['event_date'] if stored else None) if body.event_date is msgspec.UNSET else body.event_date
         precision = (stored['event_precision'] if stored else 'exact' if event_date else 'unknown') if body.event_precision is msgspec.UNSET else body.event_precision
         if event_date is not None:
@@ -77,15 +81,15 @@ async def save_memory(request):
             raise RequestError(400, 'invalid_request', 'Date and precision must agree; use null with unknown for no date.')
         ongoing = stored['is_ongoing'] if stored and body.is_ongoing is msgspec.UNSET else False if body.is_ongoing is msgspec.UNSET else body.is_ongoing
         allowed = stored['allow_analysis'] if stored and body.allow_analysis is msgspec.UNSET else True if body.allow_analysis is msgspec.UNSET else body.allow_analysis
-        changed = stored is None or any((body.text != stored['text'], event_date != stored['event_date'], precision != stored['event_precision'], ongoing != stored['is_ongoing']))
+        changed = stored is None or any((body.text != stored['text'], title != stored['title'], event_date != stored['event_date'], precision != stored['event_precision'], ongoing != stored['is_ongoing']))
         if stored and changed and body.base_revision != stored['revision']:
             conflict = stored['revision']
             if allowed != stored['allow_analysis']:
                 await connection.execute('UPDATE memories SET allow_analysis=?,updated_at=? WHERE id=? AND user_id=?', (int(allowed), config.now(), memory_id, identity))
         elif changed or allowed != stored['allow_analysis']:
             timestamp = config.now()
-            await connection.execute('''INSERT INTO memories(id,user_id,text,recorded_at,event_date,event_precision,is_ongoing,allow_analysis,revision,updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET text=excluded.text,event_date=excluded.event_date,event_precision=excluded.event_precision,is_ongoing=excluded.is_ongoing,allow_analysis=excluded.allow_analysis,revision=excluded.revision,updated_at=excluded.updated_at WHERE memories.user_id=excluded.user_id''', (memory_id, identity, body.text, stored['recorded_at'] if stored else timestamp, event_date, precision, int(ongoing), int(allowed), stored['revision'] + int(changed) if stored else 1, timestamp))
+            await connection.execute('''INSERT INTO memories(id,user_id,title,text,recorded_at,event_date,event_precision,is_ongoing,allow_analysis,revision,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,text=excluded.text,event_date=excluded.event_date,event_precision=excluded.event_precision,is_ongoing=excluded.is_ongoing,allow_analysis=excluded.allow_analysis,revision=excluded.revision,updated_at=excluded.updated_at WHERE memories.user_id=excluded.user_id''', (memory_id, identity, title, body.text, stored['recorded_at'] if stored else timestamp, event_date, precision, int(ongoing), int(allowed), stored['revision'] + int(changed) if stored else 1, timestamp))
         if stored and changed and conflict is None:
             await records.source_changed(connection, 'memory', memory_id)
         if stored and stored['allow_analysis'] and not allowed:

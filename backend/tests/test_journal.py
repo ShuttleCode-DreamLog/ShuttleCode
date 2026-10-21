@@ -24,6 +24,7 @@ async def test_create_read_repeat_edit_and_delete(client):
     page = (await client.get('/v1/dreams', headers=headers)).json()
     assert [item['id'] for item in page['items']] == [identity]
     assert page['items'][0]['preview'] == entry()['text']
+    assert page['items'][0]['tags'] == []
     changed = await client.put(path, headers=headers, json=entry('Another invented dream.', base_revision=1))
     assert changed.status_code == 200 and changed.json()['dream']['revision'] == 2
     assert changed.json()['dream']['title'] == 'Lake'

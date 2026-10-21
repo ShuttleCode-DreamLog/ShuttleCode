@@ -201,7 +201,7 @@ async def test_schema_mismatch_refuses_startup(tmp_path):
     connection = sqlite3.connect(path)
     connection.execute('PRAGMA user_version=99')
     connection.close()
-    with pytest.raises(RuntimeError, match='Schema version 99; expected 5'):
+    with pytest.raises(RuntimeError, match='Schema version 99; expected 6'):
         await db.open_database(path)
 
 
