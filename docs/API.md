@@ -50,7 +50,7 @@ Journal list items contain id, dream_date, title, mood, revision, audio_status, 
 {"analysis": false, "history": false}
 ```
 
-Each of `transcription`, `analysis`, `discussion`, `history`, `patterns` and `visuals` is an optional boolean; only the switches sent change. Send all six as false for the app's "Keep out of AI processing" control. `{}` or a repeat of the stored values changes nothing. Success is 200 with `{"dream":{…}}`. The text revision is not raised, so an open editor keeps saving with its revision; `updated_at` changes only when a switch changes. `null`, numbers, strings or a non-object body get 400; another user's or a missing dream gets 404. Unknown fields are ignored and never change other dream fields. No AI work exists yet, so a change has no further effect; the wiki 4.3.6 effects are marked as an `AI integration point` in `dreams.py`.
+Each of `transcription`, `analysis`, `discussion`, `history`, `patterns` and `visuals` is an optional boolean; only the switches sent change. Send all six as false for the app's "Keep out of AI processing" control. `{}` or a repeat of the stored values changes nothing. Success is 200 with `{"dream":{…}}`. The text revision is not raised, so an open editor keeps saving with its revision; `updated_at` changes only when a switch changes. `null`, numbers, strings or a non-object body get 400; another user's or a missing dream gets 404. Unknown fields are ignored and never change other dream fields. A change takes effect at once (wiki 4.3.6): turning `history` off removes the sections of other dreams' analyses that cited this dream and marks those analyses `outdated`; turning `analysis` or `patterns` off takes the dream out of its pattern groups and refreshes the findings; turning a switch on, or `analysis` off, schedules the dream's processing again as its switches allow. `transcription` has no effect until voice capture.
 
 ## Notes
 
@@ -69,7 +69,7 @@ Notes use the wiki's memory contract:
 
 Required: base_revision and text, at most 2,000 characters. Text may be empty for a photo note; whitespace-only text is rejected. A note without a date uses null + unknown. A dated note uses exact or approximate. New notes default to no date, not ongoing and analysis allowed; a supplied date defaults to exact. On editing, omitted optional fields retain their values: send both date and precision when changing/removing a date. checkin_id is read-only and cannot be set by this endpoint.
 
-Success: 201 on creation, 200 on update/repeat, `{"memory":{…}}`. Its fields are id, text, recorded_at, event_date, event_precision, is_ongoing, allow_analysis, checkin_id, revision, updated_at and photos. recorded_at never changes. A change to text/date/precision/ongoing raises the revision. A permission-only change keeps it. On a stale content edit, 409 preserves the content but applies an explicitly supplied analysis permission; reload before resolving the conflict. This permission is saved for later AI features and causes no AI call now.
+Success: 201 on creation, 200 on update/repeat, `{"memory":{…}}`. Its fields are id, text, recorded_at, event_date, event_precision, is_ongoing, allow_analysis, checkin_id, revision, updated_at and photos. recorded_at never changes. A change to text/date/precision/ongoing raises the revision. A permission-only change keeps it. On a stale content edit, 409 preserves the content but applies an explicitly supplied analysis permission; reload before resolving the conflict. With it on, and the account's history switch on, the note can be context for dream analyses; turning it off removes the analysis sections that cited the note and marks those analyses `outdated`, while a content change only marks them `outdated`. Neither starts an AI call.
 
 ## Note photos
 
@@ -104,7 +104,7 @@ All values are strings of at most 200 characters. Keys follow `[a-z][a-z0-9_]{0,
 
 ## AI tasks
 
-AI work runs in the backend's task worker, never inside a request. One type is scheduled so far: `organize`, for each new text revision of a text dream whose `analysis` switch is on, and again when that switch is turned on. Other types start with their handlers; the shapes below are final.
+AI work runs in the backend's task worker, never inside a request. Each new text revision of a text dream whose `analysis` switch is on schedules `organize`, and `analyze` once organization has ended; with `patterns` on, `index_dream` and `match_patterns` follow and `refresh_findings` updates the findings (Pattern discovery below). `transcribe`, `generate_image` and `generate_video` arrive with their increments; the shapes below are final.
 
 Task object, as it appears in `dream.tasks`:
 

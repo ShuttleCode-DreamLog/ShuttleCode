@@ -8,52 +8,55 @@ struct NotesView: View {
     @State private var creating: EntryRoute?
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                Section {
-                    Button { creating = EntryRoute(id: newID()) } label: { Label("Add Note", systemImage: "plus").frame(maxWidth: .infinity) }
-                        .buttonStyle(.borderedProminent).controlSize(.large)
-                        .accessibilityIdentifier("addNote")
-                        .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
-                }
-                Section {
-                    HistoryToggle()
-                } footer: { Text("The same switch as in Settings: it also covers earlier dreams. A note is used only when this and the note's own Allow AI use are both on.") }
-                if let error = model.error {
-                    Section { Text(error).foregroundStyle(.red); Button("Try again") { Task { await model.load(app) } } }
-                }
-                if model.items.isEmpty && !model.isLoading {
-                    ContentUnavailableView("No life notes", systemImage: "note.text", description: Text("Tap Add Note to record an event or thought from your waking life."))
-                }
-                ForEach(model.items) { note in
-                    NavigationLink(value: note.id) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(note.eventDate.map(displayDate) ?? note.recordedAt.formatted(date: .abbreviated, time: .omitted)).font(.subheadline.weight(.semibold))
-                            Text(note.text.isEmpty ? "Photo note" : note.text).lineLimit(3)
-                            HStack {
-                                Text("Allow AI use: \(note.allowAnalysis ? "On" : "Off")")
-                                if note.isOngoing { Text("Ongoing") }
-                                if !note.photos.isEmpty { Label("\(note.photos.count)", systemImage: "photo") }
-                            }.font(.caption).foregroundStyle(.secondary)
-                        }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 13) {
+                    Eyebrow("Your waking world")
+                    PageHeading("Small moments matter.")
+                    Button("Add note") { creating = EntryRoute(id: newID()) }.buttonStyle(.primaryWide).accessibilityIdentifier("addNote")
+                    VStack(alignment: .leading, spacing: 6) {
+                        HistoryToggle().font(.callout)
+                        Hint("The same switch as in Settings: it also covers earlier dreams. A note is used only when this and the note's own Allow AI use are both on.")
+                    }.card()
+                    if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
+                    if model.items.isEmpty && !model.isLoading {
+                        EmptyCard(title: "No life notes", text: "Tap Add note to record an event or thought from your waking life.")
                     }
+                    ForEach(model.items) { note in NavigationLink(value: note.id) { NoteCard(note: note) }.buttonStyle(.plain) }
+                    if model.hasMore {
+                        Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading)
+                    }
+                    if model.isLoading { ProgressView().frame(maxWidth: .infinity) }
                 }
-                if model.hasMore {
-                    Button("Load more") { Task { await model.load(app, more: true) } }.disabled(model.isLoading)
-                }
-                if model.isLoading { ProgressView() }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
             }
             .dreamPage()
-            .navigationTitle("Life Notes")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsButton() } }
+            .navigationTitle("Life notes")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: String.self) { NoteEditorView(id: $0) }
             .sheet(item: $creating, onDismiss: { Task { await model.load(app) } }) { entry in
                 NavigationStack { NoteEditorView(id: entry.id, newEntry: true) }
             }
             .task { await model.load(app) }
-            .refreshable { await model.load(app) }
+            .reloadable { await model.load(app) }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await model.load(app) } } }
             .onChange(of: app.refreshes) { Task { await model.load(app) } }
         }
+    }
+}
+
+struct NoteCard: View {
+    let note: Memory
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Hint([note.eventDate.map(shortDate) ?? note.recordedAt.formatted(.dateTime.month(.abbreviated).day()), note.isOngoing ? "Ongoing" : nil]
+                .compactMap(\.self).joined(separator: " · "))
+            Text(note.text.isEmpty ? "Photo note" : note.text).font(.callout).lineLimit(3)
+            Hint(["Allow AI use: \(note.allowAnalysis ? "On" : "Off")", note.photos.isEmpty ? nil : "\(note.photos.count) photo\(note.photos.count == 1 ? "" : "s")"]
+                .compactMap(\.self).joined(separator: " · "))
+        }
+        .multilineTextAlignment(.leading)
+        .card()
     }
 }
 
@@ -73,81 +76,22 @@ struct NoteEditorView: View {
         self.newEntry = newEntry
     }
     var body: some View {
-        @Bindable var editor = model
-        Form {
-            if model.isLoading { ProgressView() }
-            if let error = model.error {
-                Section {
-                    Text(error).foregroundStyle(.red)
-                    if !model.isEditing { Button("Try again") { Task { await model.load(app) } } }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 13) {
+                if model.isLoading { ProgressView() }
+                if let error = model.error {
+                    if model.isEditing { ErrorCard(error) } else { ErrorCard(error, retry: reload) }
+                }
+                if model.isEditing { editingBlock } else if let stored = model.stored { readingBlock(stored) }
+                photosBlock
+                if model.stored != nil {
+                    Button("Delete note", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet).padding(.top, 8)
                 }
             }
-            if model.isEditing {
-                Section("Life note") {
-                    TextEditor(text: $editor.value.text).focused($writingText).frame(minHeight: 220).accessibilityIdentifier("noteText")
-                    Text("\(model.value.text.unicodeScalars.count) / \(app.limits.maxMemoryChars) characters").font(.caption).foregroundStyle(.secondary)
-                }
-                Section("Details") {
-                    Toggle("Event has a date", isOn: Binding(get: { model.value.eventDate != nil }, set: { enabled in
-                        model.value.eventDate = enabled ? journalDate() : nil
-                        model.value.eventPrecision = enabled ? .exact : .unknown
-                    }))
-                    if model.value.eventDate != nil {
-                        DatePicker("Event date", selection: Binding(get: { journalDay(model.value.eventDate ?? journalDate()) }, set: { model.value.eventDate = journalDate($0) }), displayedComponents: .date)
-                        Picker("Date precision", selection: $editor.value.eventPrecision) {
-                            Text("Exact").tag(EventPrecision.exact)
-                            Text("Approximate").tag(EventPrecision.approximate)
-                        }
-                    }
-                    Toggle("Still going on", isOn: $editor.value.isOngoing)
-                    Toggle("Allow AI use", isOn: $editor.value.allowAnalysis)
-                    Text("This switch and “Use life notes and earlier dreams” in Settings must both be on for this note to be sent with a dream's analysis.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if model.conflict {
-                    Section("Stored note changed") {
-                        Button("Reload stored note") { Task { await model.load(app) } }
-                        if let stored = model.stored, stored.revision != model.value.baseRevision {
-                            Text(stored.text)
-                            Button("Keep both") { model.keepMine(both: true) }
-                            Button("Use my text") { model.keepMine() }
-                            Button("Use stored note") { model.useStored() }
-                        }
-                    }
-                }
-                if model.missing { Button("Save as a new note") { Task { await model.saveAsNew(app) } } }
-                Text("Tap Save to store this note. Unsent notes are kept only while this editor is open.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } else if let stored = model.stored {
-                Section("Life note") { Text(stored.text).textSelection(.enabled) }
-                Section("Details") {
-                    LabeledContent("Recorded", value: stored.recordedAt.formatted(date: .abbreviated, time: .shortened))
-                    if let date = stored.eventDate { LabeledContent("Event date", value: date); LabeledContent("Precision", value: stored.eventPrecision.rawValue) }
-                    LabeledContent("Ongoing", value: stored.isOngoing ? "Yes" : "No")
-                    LabeledContent("Allow AI use", value: stored.allowAnalysis ? "On" : "Off")
-                }
-            }
-            if model.stored != nil { Section { Button("Delete note", role: .destructive) { confirmingDelete = true } } }
-            Section("Photos") {
-                ForEach(model.stored?.photos ?? []) { photo in
-                    if let data = model.photoContent[photo.id], let image = UIImage(data: data) {
-                        Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 260).accessibilityLabel("Saved note photo")
-                    } else { Text("Photo could not be loaded.") }
-                    if model.isEditing { Button("Remove photo", role: .destructive) { removingPhoto = photo.id } }
-                }
-                ForEach(model.pendingPhotos) { photo in
-                    if let image = UIImage(data: photo.content) { Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 260) }
-                    Button("Remove selected photo", role: .destructive) { model.pendingPhotos.removeAll { $0.id == photo.id } }
-                }
-                if model.isEditing {
-                    PhotosPicker(selection: $selectedPhotos, maxSelectionCount: max(1, 5 - (model.stored?.photos.count ?? 0) - model.pendingPhotos.count), matching: .images) {
-                        Label("Add photos", systemImage: "photo.badge.plus")
-                    }.disabled(model.isAddingPhotos || (model.stored?.photos.count ?? 0) + model.pendingPhotos.count >= 5)
-                    if model.isAddingPhotos { ProgressView("Preparing photos…") }
-                    Text("Up to 5 photos. Tap Save to upload; text is optional for photo notes.").font(.footnote).foregroundStyle(.secondary)
-                }
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
         }
+        .dreamPage()
         .disabled(model.isSending)
         .navigationTitle(newEntry ? "New note" : "Life note")
         .navigationBarTitleDisplayMode(.inline)
@@ -186,6 +130,92 @@ struct NoteEditorView: View {
             Text(model.error ?? "The note was not saved. Your input is still here; try again.")
         }
     }
+    @ViewBuilder private var editingBlock: some View {
+        @Bindable var editor = model
+        Hint("Your note")
+        TextEditor(text: $editor.value.text)
+            .font(.callout).scrollContentBackground(.hidden).focused($writingText)
+            .frame(minHeight: 220).fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("noteText")
+            .overlay(alignment: .topLeading) {
+                if model.value.text.isEmpty {
+                    Text("What happened, and how it felt…").font(.callout).foregroundStyle(Color.muted).padding(.top, 8).padding(.leading, 5).allowsHitTesting(false)
+                }
+            }
+            .field()
+        Hint("\(model.value.text.unicodeScalars.count) / \(app.limits.maxMemoryChars) characters")
+        Heading("Details")
+        Group {
+            Toggle("Event has a date", isOn: Binding(get: { model.value.eventDate != nil }, set: { enabled in
+                model.value.eventDate = enabled ? journalDate() : nil
+                model.value.eventPrecision = enabled ? .exact : .unknown
+            })).switchRow()
+            if model.value.eventDate != nil {
+                LabeledRow("Event date") {
+                    DatePicker("Event date", selection: Binding(get: { journalDay(model.value.eventDate ?? journalDate()) }, set: { model.value.eventDate = journalDate($0) }), displayedComponents: .date).labelsHidden()
+                }
+                Picker("Date precision", selection: $editor.value.eventPrecision) {
+                    Text("Exact").tag(EventPrecision.exact)
+                    Text("Approximate").tag(EventPrecision.approximate)
+                }.pickerStyle(.segmented)
+            }
+            Toggle("Still going on", isOn: $editor.value.isOngoing).switchRow()
+            Toggle("Allow AI use", isOn: $editor.value.allowAnalysis).switchRow()
+        }.font(.callout)
+        Hint("This switch and “Use life notes and earlier dreams” in Settings must both be on for this note to be sent with a dream's analysis.")
+        if model.conflict {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Stored note changed").font(.heading)
+                Button("Reload stored note") { Task { await model.load(app) } }.buttonStyle(.secondary)
+                if let stored = model.stored, stored.revision != model.value.baseRevision {
+                    Text(stored.text).font(.callout)
+                    Button("Keep both") { model.keepMine(both: true) }.buttonStyle(.secondary)
+                    Button("Use my text") { model.keepMine() }.buttonStyle(.secondary)
+                    Button("Use stored note") { model.useStored() }.buttonStyle(.secondary)
+                }
+            }.card()
+        }
+        if model.missing { Button("Save as a new note") { Task { await model.saveAsNew(app) } }.buttonStyle(.secondary) }
+        Hint("Tap Save to store this note. Unsent notes are kept only while this editor is open.")
+    }
+    @ViewBuilder private func readingBlock(_ stored: Memory) -> some View {
+        Hint(stored.eventDate.map(displayDate) ?? stored.recordedAt.formatted(date: .abbreviated, time: .omitted))
+        Text(stored.text).font(.callout).textSelection(.enabled)
+        Heading("Details")
+        LabeledRow("Recorded") { Text(stored.recordedAt.formatted(date: .abbreviated, time: .shortened)).font(.callout) }
+        if let date = stored.eventDate {
+            LabeledRow("Event date") { Text(displayDate(date)).font(.callout) }
+            LabeledRow("Precision") { Text(stored.eventPrecision.rawValue.capitalized).font(.callout) }
+        }
+        LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
+        LabeledRow("Allow AI use") { Text(stored.allowAnalysis ? "On" : "Off").font(.callout) }
+    }
+    @ViewBuilder private var photosBlock: some View {
+        let saved = model.stored?.photos ?? []
+        if !saved.isEmpty || !model.pendingPhotos.isEmpty || model.isEditing {
+            Heading("Photos")
+            ForEach(saved) { photo in
+                if let data = model.photoContent[photo.id], let image = UIImage(data: data) {
+                    Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 260).clipShape(RoundedRectangle(cornerRadius: 15)).accessibilityLabel("Saved note photo")
+                } else { Hint("Photo could not be loaded.") }
+                if model.isEditing { Button("Remove photo", role: .destructive) { removingPhoto = photo.id }.buttonStyle(.quiet) }
+            }
+            ForEach(model.pendingPhotos) { photo in
+                if let image = UIImage(data: photo.content) { Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 260).clipShape(RoundedRectangle(cornerRadius: 15)) }
+                Button("Remove selected photo", role: .destructive) { model.pendingPhotos.removeAll { $0.id == photo.id } }.buttonStyle(.quiet)
+            }
+            if model.isEditing {
+                PhotosPicker(selection: $selectedPhotos, maxSelectionCount: max(1, 5 - saved.count - model.pendingPhotos.count), matching: .images) {
+                    Label("Add photos", systemImage: "photo.badge.plus")
+                }
+                .buttonStyle(.secondary)
+                .disabled(model.isAddingPhotos || saved.count + model.pendingPhotos.count >= 5)
+                if model.isAddingPhotos { ProgressView("Preparing photos…") }
+                Hint("Up to 5 photos. Tap Save to upload; text is optional for photo notes.")
+            }
+        }
+    }
+    private func reload() { Task { await model.load(app) } }
     private func save(close: Bool = false) async {
         writingText = false
         if await model.save(app) {

@@ -1,5 +1,6 @@
 import SwiftUI
 
+// The prototype's capture screen: title, the dream text, then date and mood; voice capture is left out until the backend has it.
 struct DreamEditorView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -17,68 +18,26 @@ struct DreamEditorView: View {
         self.presented = presented
     }
     var body: some View {
-        Form {
-            if model.isLoading { ProgressView("Loading entry…") }
-            if let error = model.error { Section { Text(error).foregroundStyle(.red) } }
-            if let draft = model.draft {
-                if model.isEditing {
-                    Section("Journal entry") {
-                        TextField("Title (optional)", text: Binding(get: { model.draft?.title ?? "" }, set: { value in model.change(app) { $0.title = value.isEmpty ? nil : value } }))
-                            .accessibilityIdentifier("journalTitle")
-                        DatePicker("Date", selection: Binding(get: { journalDay(model.draft?.dreamDate ?? journalDate()) }, set: { value in model.change(app) { $0.dreamDate = journalDate(value) } }), displayedComponents: .date)
-                        Picker("Mood", selection: Binding(get: { model.draft?.mood }, set: { value in model.change(app) { $0.mood = value } })) {
-                            Text("Not specified").tag(Mood?.none)
-                            ForEach(Mood.allCases.filter { $0 != .unknown }, id: \.self) { mood in
-                                Text(mood.rawValue.capitalized).tag(Optional(mood))
-                            }
-                        }
-                        TextEditor(text: Binding(get: { model.draft?.text ?? "" }, set: { value in model.change(app) { $0.text = value } }))
-                            .frame(minHeight: 240)
-                            .accessibilityLabel("Journal text")
-                            .accessibilityIdentifier("journalText")
-                        Text("\(draft.text.unicodeScalars.count) / \(app.limits.maxDreamChars) characters")
-                            .font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 13) {
+                if model.isLoading { ProgressView("Loading entry…") }
+                if let error = model.error { ErrorCard(error) }
+                if let draft = model.draft {
+                    if model.isEditing { capture(draft) }
+                    else if let dream = model.dream {
+                        Hint([displayDate(dream.dreamDate), dream.mood.map { $0.rawValue.capitalized }].compactMap(\.self).joined(separator: " · "))
+                        Text(dream.text).font(.callout).textSelection(.enabled)
                     }
-                    Section {
-                        Text("Changes are saved automatically when you leave this editor. Revert discards your changes.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                        if draft.unconfirmed { Text("Not confirmed by the server yet. This is checked when the entry is next loaded or sent.") }
-                    }
-                    if draft.conflict {
-                        Section("The stored entry changed") {
-                            Button("Reload stored version") { Task { await model.load(app) } }
-                            if model.conflictReloaded, let dream = model.dream {
-                                Text("Stored text").font(.headline)
-                                Text(dream.text).textSelection(.enabled)
-                                Button("Keep both") { model.keepBoth(app) }
-                                Button("Use my text") { Task { await model.useMyText(app) } }
-                                Button("Use the stored text", role: .destructive) { confirmingDiscard = true }
-                            }
-                        }
-                    } else if model.missing {
-                        Section {
-                            Button("Save as a new journal entry") { Task { await model.saveAsNew(app) } }
-                        }
-                    }
-                } else if let dream = model.dream {
-                    Section {
-                        LabeledContent("Date", value: dream.dreamDate)
-                        if let mood = dream.mood { LabeledContent("Mood", value: mood.rawValue.capitalized) }
-                    }
-                    Section("Journal text") { Text(dream.text).textSelection(.enabled) }
+                } else if !model.isLoading {
+                    Button("Try again") { Task { await model.load(app) } }.buttonStyle(.secondary)
                 }
-                // Over a dream's screen, Delete Dream stays on that screen (EGMUIUX S03).
-                if !presented {
-                    Section {
-                        Button(draft.baseRevision == 0 && !draft.unconfirmed && model.dream == nil ? "Discard draft" : "Delete journal entry", role: .destructive) { confirmingDelete = true }
-                    }
-                }
-            } else if !model.isLoading {
-                Button("Try again") { Task { await model.load(app) } }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
         }
+        .dreamPage()
         .disabled(model.isSending)
-        .navigationTitle(model.draft?.title?.isEmpty == false ? model.draft!.title! : newEntry ? "New dream" : "Dream Editor")
+        .navigationTitle(model.draft?.title?.isEmpty == false ? model.draft!.title! : newEntry ? "New dream" : "Dream")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(model.isEditing || model.isSending)
         .toolbar {
@@ -87,11 +46,14 @@ struct DreamEditorView: View {
                     Button("Done") { Task { if await model.close(app) { dismiss() } } }.disabled(model.isSending)
                 }
             }
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
                 if model.isSending { ProgressView() }
-                else if model.isEditing {
-                    Button("Revert") { confirmingDiscard = true }.accessibilityIdentifier("revertJournal")
-                } else if model.dream != nil { Button("Edit") { model.isEditing = true } }
+                else if model.isEditing { Button("Revert") { confirmingDiscard = true }.accessibilityIdentifier("revertJournal") }
+                else if model.dream != nil { Button("Edit") { model.isEditing = true } }
+                // Over a dream's screen, Delete Dream stays on that screen (EGMUIUX S03).
+                if !presented, let draft = model.draft {
+                    Button(draft.baseRevision == 0 && !draft.unconfirmed && model.dream == nil ? "Discard draft" : "Delete journal entry", systemImage: "trash", role: .destructive) { confirmingDelete = true }
+                }
             }
         }
         .confirmationDialog("Delete this journal entry and any draft on this phone? This cannot be undone.", isPresented: $confirmingDelete, titleVisibility: .visible) {
@@ -105,5 +67,53 @@ struct DreamEditorView: View {
         .task { app.editing.insert(model.id); await model.load(app) }
         .onDisappear { Task { await model.close(app); app.editing.remove(model.id) } }
         .onChange(of: scenePhase) { _, phase in if phase != .active { Task { await model.close(app) } } }
+    }
+
+    @ViewBuilder private func capture(_ draft: Draft) -> some View {
+        Eyebrow("Capture before it fades")
+        Text("What do you remember?").font(.display)
+        TextField("Dream title", text: Binding(get: { model.draft?.title ?? "" }, set: { value in model.change(app) { $0.title = value.isEmpty ? nil : value } }))
+            .font(.heading)
+            .accessibilityIdentifier("journalTitle")
+        Hint("Your dream")
+        TextEditor(text: Binding(get: { model.draft?.text ?? "" }, set: { value in model.change(app) { $0.text = value } }))
+            .font(.callout).scrollContentBackground(.hidden)
+            .frame(minHeight: 240).fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel("Journal text")
+            .accessibilityIdentifier("journalText")
+            .overlay(alignment: .topLeading) {
+                if draft.text.isEmpty {
+                    Text("A place, a feeling, a tiny detail…").font(.callout).foregroundStyle(Color.muted).padding(.top, 8).padding(.leading, 5).allowsHitTesting(false)
+                }
+            }
+            .field()
+        Hint("\(draft.text.unicodeScalars.count) / \(app.limits.maxDreamChars) characters")
+        LabeledRow("Date") {
+            DatePicker("Date", selection: Binding(get: { journalDay(model.draft?.dreamDate ?? journalDate()) }, set: { value in model.change(app) { $0.dreamDate = journalDate(value) } }), displayedComponents: .date)
+                .labelsHidden()
+        }
+        LabeledRow("Mood") {
+            Picker("Mood", selection: Binding(get: { model.draft?.mood }, set: { value in model.change(app) { $0.mood = value } })) {
+                Text("Not specified").tag(Mood?.none)
+                ForEach(Mood.allCases.filter { $0 != .unknown }, id: \.self) { mood in Text(mood.rawValue.capitalized).tag(Optional(mood)) }
+            }.labelsHidden()
+        }
+        Hint("Kept on this phone as you write and sent when you tap Done. Revert discards your changes.")
+        if draft.unconfirmed { Hint("Not confirmed by the server yet. This is checked when the entry is next loaded or sent.") }
+        if draft.conflict {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("The stored entry changed").font(.heading)
+                Button("Reload stored version") { Task { await model.load(app) } }.buttonStyle(.secondary)
+                if model.conflictReloaded, let dream = model.dream {
+                    Hint("Stored text")
+                    Text(dream.text).font(.callout).textSelection(.enabled)
+                    Button("Keep both") { model.keepBoth(app) }.buttonStyle(.secondary)
+                    Button("Use my text") { Task { await model.useMyText(app) } }.buttonStyle(.secondary)
+                    Button("Use the stored text", role: .destructive) { confirmingDiscard = true }.buttonStyle(.secondary)
+                }
+            }.card()
+        } else if model.missing {
+            Button("Save as a new journal entry") { Task { await model.saveAsNew(app) } }.buttonStyle(.secondary)
+        }
     }
 }

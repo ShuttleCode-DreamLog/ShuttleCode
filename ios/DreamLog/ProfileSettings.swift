@@ -77,28 +77,34 @@ struct ProfileSettings: View {
     @State private var addingField = false
     @State private var fieldKey = ""
     var body: some View {
-        Section("Profile") {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Profile").font(.heading)
             ForEach(model.keys, id: \.self) { key in
                 let field = profileFields.first { $0.key == key }
-                HStack {
+                HStack(spacing: 8) {
                     TextField(field?.title ?? key.replacingOccurrences(of: "_", with: " ").capitalized, text: Binding(get: { model.fields[key] ?? "" }, set: { model.fields[key] = $0 }), prompt: Text(field?.title ?? key))
                         .keyboardType(field?.numeric == true ? .numberPad : .default)
                         .accessibilityIdentifier("profile_\(key)")
-                    Button("Remove \(field?.title ?? key)", systemImage: "minus.circle", role: .destructive) { model.fields.removeValue(forKey: key) }.labelStyle(.iconOnly)
+                        .field()
+                    Button("Remove \(field?.title ?? key)", systemImage: "minus.circle", role: .destructive) { model.fields.removeValue(forKey: key) }
+                        .labelStyle(.iconOnly).buttonStyle(.quiet)
                 }
             }
-            Button("Add field", systemImage: "plus") { fieldKey = ""; addingField = true }
-            Button("Save profile") { Task { await model.save(app) } }
-                .disabled(model.stored == nil || model.isLoading || model.conflict)
+            HStack(spacing: 10) {
+                Button("Add field", systemImage: "plus") { fieldKey = ""; addingField = true }.buttonStyle(.secondary)
+                Button("Save profile") { Task { await model.save(app) } }.buttonStyle(.primary)
+                    .disabled(model.stored == nil || model.isLoading || model.conflict)
+            }
             if model.isLoading || model.isSaving { ProgressView() }
-            if let error = model.error { Text(error).foregroundStyle(.red) }
+            if let error = model.error { Text(error).font(.callout).foregroundStyle(Color.danger) }
             if model.conflict {
-                Button("Reload profile and discard edits") { Task { await model.load(app, discard: true) } }
-                Button("Reload while keeping edits") { Task { await model.load(app); if model.error == nil { model.conflict = false } } }
+                Button("Reload profile and discard edits") { Task { await model.load(app, discard: true) } }.buttonStyle(.quiet)
+                Button("Reload while keeping edits") { Task { await model.load(app); if model.error == nil { model.conflict = false } } }.buttonStyle(.quiet)
             } else if model.error != nil {
-                Button("Retry loading profile") { Task { await model.load(app) } }
+                Button("Retry loading profile") { Task { await model.load(app) } }.buttonStyle(.quiet)
             }
         }
+        .card()
         .disabled(model.isLoading || model.isSaving || app.deleting)
         .task { await model.load(app) }
         .alert("Add profile field", isPresented: $addingField) {

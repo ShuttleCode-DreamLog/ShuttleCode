@@ -31,7 +31,10 @@ let noticeFingerprint = SHA256.hash(data: Data(([noticeIntroduction] + privacyPa
 struct PrivacyText: View {
     var body: some View {
         ForEach(privacyParts) { part in
-            Section(part.title) { Text(part.text) }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(part.title).font(.callout.weight(.semibold))
+                Text(part.text).font(.callout)
+            }
         }
     }
 }
@@ -40,13 +43,20 @@ struct PrivacyNoticeView: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         NavigationStack {
-            List {
-                Section { Text(noticeIntroduction) }
-                PrivacyText()
-                Section { Button("I acknowledge this notice") { Task { await model.acknowledgeNotice() } } }
-                if model.hasPriorAcknowledgment { Section { DeleteJournalButton() } }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 13) {
+                    Eyebrow("Before you begin")
+                    Text(noticeIntroduction).font(.callout)
+                    PrivacyText()
+                    Button("I acknowledge this notice") { Task { await model.acknowledgeNotice() } }.buttonStyle(.primaryWide).padding(.top, 8)
+                    if model.hasPriorAcknowledgment { DeleteJournalButton() }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
             }
+            .dreamPage()
             .navigationTitle("Privacy notice")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

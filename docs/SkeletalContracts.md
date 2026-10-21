@@ -184,7 +184,7 @@ Swift types (wiki 4.8.10): `PatternsResponse`, `Period`, `Finding`, `FindingExam
 
 ## Open questions for the team
 
-- Pattern discovery was designed as a stretch goal (wiki Arc C) and is now Skeletal. The app follows the team's UI/UX exhibit (EGMUIUX, screens S01–S10): Journal, Patterns and Life Notes tabs, with Settings at the top right of each.
+- Pattern discovery was designed as a stretch goal (wiki Arc C) and is now Skeletal. The app follows the team's user-test prototype (`DreamLog_User_Test.html`, 21 October 2026): Journal, Pattern, Add dream, Life notes and Settings tabs; the EGMUIUX exhibit (S01–S10) remains the source for what each screen must contain.
 - Summary and tag corrections have no story map card; the app offers them on Dream Detail (15 October 2026). The team may still drop them.
 - EGMUIUX draws Hide Pattern with a Dismissed view and Restore. The backend's dismissal (wiki 4.8.7) removes one dream from a group for good and has no restore, so the app offers "Not part of this pattern" per dream, shows dismissal notes with Remove note, and has no Dismissed view. Its Garden has no one-dream seedlings, because the server returns only groups of two or more dreams.
 - The automatic resend of queued dreams follows story map card R2 over the wiki's rule that a draft leaves the phone only on the user's tap (4.4.4, rule 2).

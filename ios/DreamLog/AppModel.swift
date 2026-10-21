@@ -3,7 +3,7 @@ import Network
 import Observation
 import UserNotifications
 
-nonisolated enum AppTab: Hashable { case journal, patterns, notes }
+nonisolated enum AppTab: Hashable { case journal, patterns, add, notes, settings }
 
 @MainActor @Observable
 final class AppModel {
@@ -19,7 +19,9 @@ final class AppModel {
     var streamInProgress = false
     var recording = false
     var tab = AppTab.journal
-    // Raised when the app returns to the foreground or the connection returns; open screens run load() on it (wiki 4.4.6).
+    // The Add dream tab and Type a dream present this editor over the tabs (DreamLog_User_Test.html).
+    var newDream: EntryRoute?
+    // Raised when the app returns to the foreground, the connection returns or the editor over the tabs closes; open screens run load() on it (wiki 4.4.6).
     var refreshes = 0
     // Set by "Show dreams with this tag" on a dream's screen; the journal takes it over as its filter.
     var requestedTag: String?

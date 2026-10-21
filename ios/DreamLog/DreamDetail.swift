@@ -81,6 +81,7 @@ let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, titl
 let historyOffLine = "Turning this off removes the parts of analyses that cite it and starts the discussions that used it afresh. Turning it on again does not bring them back."
 let correctionLine = "A correction marks the analysis as outdated and starts the discussion afresh."
 
+// The prototype's dream page: date and Delete, tags, Original text, Summary, Analysis; the sources and AI switches follow below.
 struct DreamDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -88,6 +89,7 @@ struct DreamDetailView: View {
     @State private var analysis: AnalysisModel
     @State private var editing = false
     @State private var showSwitches = false
+    @State private var showContext = false
     @State private var confirmingDelete = false
     @State private var confirmingKeepOut = false
     @State private var confirmingHistoryOff = false
@@ -102,38 +104,42 @@ struct DreamDetailView: View {
         _analysis = State(initialValue: AnalysisModel(dreamId: id))
     }
     var body: some View {
-        List {
-            if let error = model.error ?? analysis.error {
-                Section { Text(error).foregroundStyle(.red); Button("Try again") { Task { await load() } } }
-            }
-            if let dream = model.dream {
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(dream.title ?? "Untitled dream").font(.title3.weight(.semibold))
-                        Text("\(displayDate(dream.dreamDate)) · \(model.draft?.unsent == true ? "Saved on this device · Waiting to sync" : "Saved · Synced")")
-                            .font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                if let error = model.error ?? analysis.error { ErrorCard(error) { Task { await load() } } }
+                if let dream = model.dream {
+                    HStack(alignment: .firstTextBaseline) {
+                        Hint("\(displayDate(dream.dreamDate)) · \(model.draft?.unsent == true ? "Saved on this device · Waiting to sync" : "Synced")")
+                        Spacer()
+                        Button("Delete Dream", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet)
                     }
-                }
-                Section("Your Dream") {
-                    Text(dream.text).textSelection(.enabled)
-                    if let mood = dream.mood { LabeledContent("Mood", value: mood.rawValue.capitalized) }
-                }
-                permissionsSection(dream)
-                organizationSection(dream)
-                analysisSection(dream)
-                if let value = analysis.analysis { contextSection(value, dream: dream) }
-                Section { Button("Delete Dream", role: .destructive) { confirmingDelete = true } }
-            } else if model.isLoading { ProgressView("Loading dream…") }
+                    tagsBlock(dream)
+                    Heading("Original text")
+                    Text(dream.text).font(.callout).textSelection(.enabled)
+                    if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
+                    Button("Edit text") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
+                    Heading("Summary")
+                    organizationBlock(dream)
+                    Heading("Analysis")
+                    analysisBlock(dream)
+                    if let value = analysis.analysis {
+                        DisclosureGroup("Information used for this analysis", isExpanded: $showContext) { contextBlock(value, dream: dream) }.font(.callout).padding(.top, 8)
+                    }
+                    Heading("AI use")
+                    permissionsBlock(dream)
+                } else if model.isLoading { ProgressView("Loading dream…") }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
         }
         .dreamPage()
-        .navigationTitle("Dream Detail")
+        .navigationTitle(model.dream?.title ?? "Dream")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { Button("Edit Dream") { editing = true }.disabled(model.dream == nil || model.isSending) }
         .sheet(isPresented: $editing, onDismiss: { Task { await load() } }) {
             NavigationStack { DreamEditorView(id: id, presented: true) }
         }
         .task { await load() }
-        .refreshable { await load() }
+        .reloadable { await load() }
         .onChange(of: app.refreshes) { Task { await load() } }
         .confirmationDialog("Delete this dream? Deleting this dream also removes the analyses of other dreams and the discussion replies that were written with it.", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Dream", role: .destructive) { Task { await model.delete(app); if model.deleted { dismiss() } } }
@@ -169,28 +175,60 @@ struct DreamDetailView: View {
         if case let .tag(tag) = correcting { "Rename “\(tag.text)”" } else { "Correct the summary" }
     }
 
-    @ViewBuilder private func permissionsSection(_ dream: Dream) -> some View {
+    // Tags are pills; each opens its corrections, and a removed tag stays, struck through, until it is restored.
+    @ViewBuilder private func tagsBlock(_ dream: Dream) -> some View {
+        if let organization = dream.organization {
+            let editable = organization.status == .current
+            Wrap(spacing: 6) {
+                ForEach(organization.tags.filter { !$0.removed }) { tag in
+                    Menu {
+                        Section("\(tag.category.rawValue.capitalized)\(tag.feeling == .inferred ? " · inferred" : "")\(tag.corrected ? " · your correction" : "") · “\(tag.excerpt)”") {
+                            Button("Show dreams with this tag", systemImage: "line.3.horizontal.decrease") { app.showJournal(tag: tag.text) }
+                            if editable {
+                                Button("Rename…", systemImage: "pencil") { correctionText = tag.text; correcting = .tag(tag) }
+                                if tag.corrected { Button("Restore “\(tag.originalText)”", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
+                                Button("Remove", systemImage: "minus.circle", role: .destructive) {
+                                    Task { await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: "")) }
+                                }
+                            }
+                        }
+                    } label: { Pill(tag.text) }
+                }
+                ForEach(organization.tags.filter(\.removed)) { tag in
+                    Menu {
+                        if editable { Button("Restore", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
+                    } label: { Pill(tag.originalText, struck: true) }
+                    .accessibilityLabel("Removed tag \(tag.originalText)")
+                }
+            }
+            .disabled(model.isSending)
+        }
+    }
+
+    private func permissionsBlock(_ dream: Dream) -> some View {
         let keptOut = dreamSwitches.allSatisfy { !dream.permissions[keyPath: $0.path] }
-        Section {
+        return VStack(alignment: .leading, spacing: 4) {
             Toggle("Keep out of AI processing", isOn: Binding(get: { keptOut && !showSwitches }, set: { on in
                 if !on { showSwitches = true }
                 else if dream.permissions.history { confirmingKeepOut = true }
                 else { Task { await keepOut() } }
-            }))
+            })).switchRow()
             DisclosureGroup("AI switches", isExpanded: $showSwitches) {
-                ForEach(dreamSwitches, id: \.key) { item in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Toggle(item.title, isOn: Binding(get: { dream.permissions[keyPath: item.path] }, set: { on in
-                            if item.key == "history" && !on { confirmingHistoryOff = true }
-                            else { Task { await model.savePermissions(app, [item.key: on]) } }
-                        }))
-                        Text(item.line).font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(dreamSwitches, id: \.key) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle(item.title, isOn: Binding(get: { dream.permissions[keyPath: item.path] }, set: { on in
+                                if item.key == "history" && !on { confirmingHistoryOff = true }
+                                else { Task { await model.savePermissions(app, [item.key: on]) } }
+                            }))
+                            Hint(item.line)
+                        }
                     }
-                }
-            }
-        } header: { Text("AI use") } footer: {
-            Text("Reading, searching and editing never need AI permission. Turning AI use off keeps your writing and does not rerun earlier analyses.")
+                }.padding(.top, 8)
+            }.padding(.vertical, 12)
+            Hint("Reading, searching and editing never need AI permission. Turning AI use off keeps your writing and does not rerun earlier analyses.")
         }
+        .font(.callout)
         .disabled(model.isSending)
     }
     private func keepOut() async {
@@ -198,60 +236,25 @@ struct DreamDetailView: View {
         await model.savePermissions(app, Dictionary(uniqueKeysWithValues: dreamSwitches.map { ($0.key, false) }))
     }
 
-    @ViewBuilder private func organizationSection(_ dream: Dream) -> some View {
+    private func organizationBlock(_ dream: Dream) -> some View {
         let organize = dream.tasks.first { $0.type == .organize }
-        Section {
+        return Group {
             if let organize, organize.inProgress { Label("Preparing the summary and tags…", systemImage: "hourglass").font(.callout) }
             if let organize, organize.status == .failed {
                 Text(failureText(organize)).font(.callout)
-                Button("Retry summary and tags") { Task { await model.retry(app, task: organize); await analysis.load(app) } }
+                Button("Retry summary and tags") { Task { await model.retry(app, task: organize); await analysis.load(app) } }.buttonStyle(.secondary)
             }
             if let organization = dream.organization {
-                let editable = organization.status == .current
-                Text(organization.status == .current ? "Status: Up to date" : "Status: Outdated after an edit. A new summary follows.")
-                    .font(.caption).foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Summary").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    Text(organization.summary)
-                    if organization.summaryCorrected { Text("Your correction").font(.caption).foregroundStyle(.secondary) }
-                }
-                if editable { Button("Correct summary") { correctionText = organization.summary; correcting = .summary } }
-                ForEach(organization.tags.filter { !$0.removed }) { tag in
-                    Menu {
-                        Button("Show dreams with this tag", systemImage: "line.3.horizontal.decrease") { app.showJournal(tag: tag.text) }
-                        if editable {
-                            Button("Rename…", systemImage: "pencil") { correctionText = tag.text; correcting = .tag(tag) }
-                            if tag.corrected { Button("Restore “\(tag.originalText)”", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
-                            Button("Remove", systemImage: "minus.circle", role: .destructive) {
-                                Task { await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: "")) }
-                            }
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(tag.text).foregroundStyle(.primary)
-                            Text("\(tag.category.rawValue.capitalized)\(tag.feeling == .inferred ? " · inferred" : "")\(tag.corrected ? " · your correction" : "") · “\(tag.excerpt)”")
-                                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
-                        }
-                    }
-                }
-                let removed = organization.tags.filter(\.removed)
-                if !removed.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Removed tags").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        ForEach(removed) { tag in
-                            HStack {
-                                Text(tag.originalText).strikethrough().foregroundStyle(.secondary)
-                                Spacer()
-                                if editable { Button("Restore") { Task { await restore(tag) } }.buttonStyle(.borderless) }
-                            }
-                        }
-                    }
+                Hint(organization.status == .current ? "Up to date" : "Outdated after an edit. A new summary follows.")
+                Text(organization.summary).font(.callout)
+                if organization.summaryCorrected { Hint("Your correction") }
+                if organization.status == .current {
+                    Button("Correct summary") { correctionText = organization.summary; correcting = .summary }.buttonStyle(.quiet)
                 }
             } else if organize == nil {
-                Text(dream.permissions.analysis ? "No summary yet." : "Analysis is off for this dream, so no summary or tags are made.")
-                    .foregroundStyle(.secondary)
+                Hint(dream.permissions.analysis ? "No summary yet." : "Analysis is off for this dream, so no summary or tags are made.")
             }
-        } header: { Text("AI summary and tags") }
+        }
         .disabled(model.isSending)
     }
     private func restore(_ tag: Tag) async {
@@ -266,75 +269,76 @@ struct DreamDetailView: View {
     }
 
     // What the analysis presents follows the order of the wiki 4.6.7 table.
-    @ViewBuilder private func analysisSection(_ dream: Dream) -> some View {
+    private func analysisBlock(_ dream: Dream) -> some View {
         let task = analysis.task
         let organize = dream.tasks.first { $0.type == .organize }
-        Section {
+        return Group {
             if let task, task.inProgress {
                 Label(task.type == .organize ? "Preparing the summary and tags first…" : task.type == .transcribe ? "Preparing the transcript first…" : "Preparing the analysis…", systemImage: "hourglass")
                     .font(.callout)
-                Text("The result appears when you return to this screen or pull to refresh.").font(.caption).foregroundStyle(.secondary)
+                Hint("The result appears when you return to this screen or pull to refresh.")
             } else if let task, task.status == .failed {
                 Text(failureText(task)).font(.callout)
-                Button("Retry") { Task { await analysis.retry(app) } }
+                Button("Retry") { Task { await analysis.retry(app) } }.buttonStyle(.secondary)
             }
             if let value = analysis.analysis {
-                Text(task?.inProgress == true || value.status != .current ? "Status: Outdated" : "Status: Up to date")
-                    .font(.caption).foregroundStyle(.secondary)
+                Hint(task?.inProgress == true || value.status != .current ? "Outdated" : "Up to date")
                 if value.sections.isEmpty {
-                    Text("This analysis has no sections left, because a source it was written with was deleted or excluded.").foregroundStyle(.secondary)
+                    Hint("This analysis has no sections left, because a source it was written with was deleted or excluded.")
                 }
                 ForEach(Array(value.sections.enumerated()), id: \.offset) { _, section in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(section.kind.heading).font(.subheadline.weight(.semibold))
-                        Text(value.text(of: section))
-                        Text("Sources: \(value.sources(of: section).joined(separator: ", "))").font(.caption).foregroundStyle(.secondary)
-                    }
+                        Text(section.kind.heading).font(.callout.weight(.semibold))
+                        Text(value.text(of: section)).font(.callout)
+                        Hint("Sources: \(value.sources(of: section).joined(separator: ", "))")
+                    }.padding(.top, 4)
                 }
-                if value.withheld > 0 { Text("\(value.withheld) part(s) were left out because their sources could not be checked.").font(.caption).foregroundStyle(.secondary) }
-                Text("These are tentative reflections, not diagnoses or established facts.").font(.caption).foregroundStyle(.secondary)
+                if value.withheld > 0 { Hint("\(value.withheld) part(s) were left out because their sources could not be checked.") }
+                Hint("These are tentative reflections, not diagnoses or established facts.")
             } else if !dream.permissions.analysis {
-                Text("Analysis is off for this dream.").foregroundStyle(.secondary)
+                Hint("Analysis is off for this dream.")
             } else if task?.inProgress != true {
-                Text("No analysis yet.").foregroundStyle(.secondary)
+                Hint("No analysis yet.")
             }
-            if analysis.analysis != nil && !dream.permissions.analysis { Text("Analysis is off for this dream.").font(.caption).foregroundStyle(.secondary) }
+            if analysis.analysis != nil && !dream.permissions.analysis { Hint("Analysis is off for this dream.") }
             if dream.permissions.analysis && task?.inProgress != true {
                 // A refresh while the summary waits for the daily limit would buy a weaker analysis; retry that first (wiki 4.6.7).
                 if let organize, organize.limited {
-                    Button("Retry summary and tags") { Task { await model.retry(app, task: organize); await analysis.load(app) } }
+                    Button("Retry summary and tags") { Task { await model.retry(app, task: organize); await analysis.load(app) } }.buttonStyle(.secondary)
                 } else {
                     Button("Update Analysis") { if analysis.analysis == nil { Task { await analysis.refresh(app) } } else { confirmingRefresh = true } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.primary)
                 }
             }
-        } header: { Text("AI analysis") }
+        }
         .disabled(analysis.isSending)
     }
 
-    @ViewBuilder private func contextSection(_ value: Analysis, dream: Dream) -> some View {
-        Section {
+    private func contextBlock(_ value: Analysis, dream: Dream) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(value.context) { entry in
                 switch (entry.available, entry.kind, entry.label) {
-                case (true, .memory, _): NavigationLink(value: Route.note(entry.sourceId)) { contextRow(entry) }
-                case (true, .dream, let label) where label != "DREAM": NavigationLink(value: Route.dream(entry.sourceId)) { contextRow(entry) }
-                default: contextRow(entry)
+                case (true, .memory, _): NavigationLink(value: Route.note(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
+                case (true, .dream, let label) where label != "DREAM": NavigationLink(value: Route.dream(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
+                default: contextRow(entry, link: false)
                 }
             }
-            if value.removedSources > 0 { Text("\(value.removedSources) source(s) used for this analysis have since been deleted or excluded.").font(.caption) }
+            if value.removedSources > 0 { Hint("\(value.removedSources) source(s) used for this analysis have since been deleted or excluded.") }
             if value.dreamDate != dream.dreamDate || value.mood != dream.mood {
-                Text("Written for the date \(displayDate(value.dreamDate)) and the mood \(value.mood?.rawValue ?? "not specified").").font(.caption)
+                Hint("Written for the date \(displayDate(value.dreamDate)) and the mood \(value.mood?.rawValue ?? "not specified").")
             }
-        } header: { Text("Information used for this analysis") } footer: {
-            Text("Inputs, not evidence. Only records you allow are used; life notes and earlier dreams also need “Use life notes and earlier dreams” in Settings.")
-        }
+            Hint("Inputs, not evidence. Only records you allow are used; life notes and earlier dreams also need “Use life notes and earlier dreams” in Settings.")
+        }.padding(.top, 8)
     }
-    private func contextRow(_ entry: ContextEntry) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(entry.name)
-            if !entry.available { Text("Changed since this analysis was made").font(.caption).foregroundStyle(.secondary) }
-            else if entry.label == "DESC" { Text("Shown above under AI summary and tags").font(.caption).foregroundStyle(.secondary) }
-            if let cut = entry.cutTo { Text("Only its first \(cut) characters were sent.").font(.caption).foregroundStyle(.secondary) }
+    private func contextRow(_ entry: ContextEntry, link: Bool) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.name).font(.callout)
+                if !entry.available { Hint("Changed since this analysis was made") }
+                else if entry.label == "DESC" { Hint("Shown above under Summary") }
+                if let cut = entry.cutTo { Hint("Only its first \(cut) characters were sent.") }
+            }
+            if link { Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(Color.muted) }
         }
     }
 }

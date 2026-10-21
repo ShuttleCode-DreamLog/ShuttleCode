@@ -9,20 +9,31 @@ struct RootView: View {
         Group {
             if model.deleting { DeletionView() }
             else if !model.ready {
-                VStack(spacing: 16) {
-                    if let error = model.error { Text(error); Button("Try again") { Task { await model.start() } } }
-                    else { ProgressView("Opening DreamLog…") }
-                }.padding()
+                VStack(alignment: .leading, spacing: 16) {
+                    if let error = model.error {
+                        Text(error).font(.callout)
+                        Button("Try again") { Task { await model.start() } }.buttonStyle(.secondary)
+                    } else { ProgressView("Opening DreamLog…") }
+                }
+                .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity).dreamPage()
             } else if !model.noticeSeen { PrivacyNoticeView() }
             else {
-                TabView(selection: $model.tab) {
-                    Tab("Journal", systemImage: "book", value: AppTab.journal) { JournalView() }
-                    Tab("Patterns", systemImage: "leaf", value: AppTab.patterns) { PatternsView() }
-                    Tab("Life Notes", systemImage: "note.text", value: AppTab.notes) { NotesView() }
+                // The center tab opens the dream editor over the tabs instead of showing a screen of its own (DreamLog_User_Test.html nav).
+                TabView(selection: Binding(get: { model.tab }, set: { tab in
+                    if tab == .add { model.tab = .journal; model.newDream = EntryRoute(id: newID()) } else { model.tab = tab }
+                })) {
+                    Tab("Journal", systemImage: "list.bullet.rectangle", value: AppTab.journal) { JournalView() }
+                    Tab("Pattern", systemImage: "lightbulb", value: AppTab.patterns) { PatternsView() }
+                    Tab("Add dream", systemImage: "plus", value: AppTab.add) { Color.paper }
+                    Tab("Life notes", systemImage: "pencil", value: AppTab.notes) { NotesView() }
+                    Tab("Settings", systemImage: "gearshape", value: AppTab.settings) { SettingsView() }
+                }
+                .sheet(item: $model.newDream, onDismiss: { model.refreshes += 1 }) { entry in
+                    NavigationStack { DreamEditorView(id: entry.id, newEntry: true) }
                 }
             }
         }
-        .tint(.dusk)
+        .tint(.sage)
         .task { await model.start() }
         .task { await model.watchConnection() }
         .onChange(of: scenePhase) { _, phase in

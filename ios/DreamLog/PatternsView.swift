@@ -60,50 +60,56 @@ extension APIError {
     var status: Int? { if case let .server(status, _, _) = self { status } else { nil } }
 }
 
+nonisolated struct PatternRoute: Hashable { let groupId: String }
+
+// The prototype's patterns list: a search field and one card per finding that opens the pattern's own page.
 struct PatternsView: View {
     @Environment(AppModel.self) private var app
     @State private var model = PatternsModel()
-    @State private var path: [Route] = []
+    @State private var path = NavigationPath()
     @State private var garden = false
     @State private var selected: String?
+    @State private var query = ""
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                Section {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 13) {
                     Picker("View", selection: $garden) {
                         Text("List").tag(false)
                         Text("Garden").tag(true)
                     }.pickerStyle(.segmented)
-                } footer: { Text(periodText) }
-                if let error = model.error {
-                    Section { Text(error).foregroundStyle(.red); Button("Try again") { Task { await model.load(app) } } }
-                }
-                if let response = model.response {
-                    if !response.available {
-                        Section { Text("New matching is not available on the server at the moment. Patterns found earlier are still shown.").font(.callout) }
-                    }
-                    if let task = response.task, task.status == .failed {
-                        Section {
-                            Text("The findings could not be updated. \(failureText(task))").font(.callout)
-                            Button("Retry") { Task { await model.retry(app) } }
+                    Hint(periodText)
+                    if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
+                    if let response = model.response {
+                        if !response.available {
+                            Text("New matching is not available on the server at the moment. Patterns found earlier are still shown.").font(.callout).card()
                         }
-                    }
-                    if response.insufficientHistory {
-                        ContentUnavailableView("Not enough recorded history yet", systemImage: "leaf",
-                                               description: Text("A pattern appears once two or more of your dreams share a person, place, feeling or theme. Keep recording."))
-                    } else if garden {
-                        gardenSection(response)
-                    } else {
-                        ForEach(response.findings) { finding in FindingSection(finding: finding, response: response, model: model) }
-                    }
-                } else if model.isLoading { ProgressView("Looking for patterns…") }
+                        if let task = response.task, task.status == .failed {
+                            ErrorCard("The findings could not be updated. \(failureText(task))", retryTitle: "Retry") { Task { await model.retry(app) } }
+                        }
+                        if response.insufficientHistory {
+                            EmptyCard(title: "Not enough recorded history yet", text: "A pattern appears once two or more of your dreams share a person, place, feeling or theme. Keep recording.")
+                        } else if garden {
+                            gardenBlock(response)
+                        } else {
+                            TextField("Search patterns…", text: $query).field()
+                            ForEach(response.findings.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }) { finding in
+                                NavigationLink(value: PatternRoute(groupId: finding.groupId)) { FindingCard(finding: finding) }
+                                    .buttonStyle(.plain).accessibilityIdentifier("patternCard")
+                            }
+                        }
+                    } else if model.isLoading { ProgressView("Looking for patterns…") }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
             }
             .dreamPage()
             .navigationTitle("Patterns")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { SettingsButton() } }
+            .navigationBarTitleDisplayMode(.inline)
             .routeDestinations()
+            .navigationDestination(for: PatternRoute.self) { route in PatternDetailView(groupId: route.groupId, model: model) }
             .disabled(model.isSending)
-            .refreshable { await model.load(app) }
+            .reloadable { await model.load(app) }
             .task { await model.load(app) }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await model.load(app) } } }
             .onChange(of: app.refreshes) { Task { await model.load(app) } }
@@ -115,105 +121,156 @@ struct PatternsView: View {
     }
 
     // Garden: the same findings as plants sized by the number of distinct dreams that contain them (EGMUIUX S10).
-    @ViewBuilder private func gardenSection(_ response: PatternsResponse) -> some View {
+    @ViewBuilder private func gardenBlock(_ response: PatternsResponse) -> some View {
         let largest = Double(response.findings.map(\.supportingDreams).max() ?? 1)
         let current = response.findings.first { $0.groupId == selected } ?? response.findings.first
-        Section {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 16) {
-                ForEach(response.findings) { finding in
-                    let chosen = finding.groupId == current?.groupId
-                    let size = 64 + 56 * Double(finding.supportingDreams) / largest
-                    Button { selected = finding.groupId } label: {
-                        VStack(spacing: 4) {
-                            Circle()
-                                .fill(chosen ? Color.duskFill : Color(uiColor: .secondarySystemGroupedBackground))
-                                .strokeBorder(Color.dusk, style: StrokeStyle(lineWidth: chosen ? 2 : 1, dash: finding.kind == .recurring ? [] : [4, 3]))
-                                .frame(width: size, height: size)
-                                .overlay { Text(finding.name).font(.caption.weight(chosen ? .bold : .regular)).multilineTextAlignment(.center).padding(6) }
-                            Rectangle().fill(Color.dusk.opacity(0.4)).frame(width: 2, height: 14)
-                            Text("\(finding.supportingDreams) dreams").font(.caption2).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(finding.name), \(finding.supportingDreams) dreams\(chosen ? ", selected" : "")")
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 16) {
+            ForEach(response.findings) { finding in
+                let chosen = finding.groupId == current?.groupId
+                let size = 64 + 56 * Double(finding.supportingDreams) / largest
+                Button { selected = finding.groupId } label: {
+                    VStack(spacing: 4) {
+                        Circle()
+                            .fill(chosen ? Color.soft : Color.card)
+                            .strokeBorder(chosen ? Color.sage : Color.bubble, style: StrokeStyle(lineWidth: chosen ? 2 : 1, dash: finding.kind == .recurring ? [] : [4, 3]))
+                            .frame(width: size, height: size)
+                            .overlay { Text(finding.name).font(.system(.caption, design: .serif).weight(chosen ? .bold : .regular)).multilineTextAlignment(.center).padding(6) }
+                        Rectangle().fill(Color.sage.opacity(0.4)).frame(width: 2, height: 14)
+                        Hint("\(finding.supportingDreams) dreams")
+                    }.frame(maxWidth: .infinity)
                 }
-            }.padding(.vertical, 8)
-        } footer: { Text("Each plant is a theme found in your dreams; its size shows how many distinct dreams contain it. Dashed plants are related examples that do not yet recur.") }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(finding.name), \(finding.supportingDreams) dreams\(chosen ? ", selected" : "")")
+            }
+        }
+        .padding(.vertical, 8).card()
+        Hint("Each plant is a theme found in your dreams; its size shows how many distinct dreams contain it. Dashed plants are related examples that do not yet recur.")
         if let current {
-            Section {
-                ForEach(current.examples) { example in NavigationLink(value: Route.dream(example.dreamId)) { ExampleRow(example: example) } }
-            } header: { Text("\(current.name) · \(current.supportingDreams) distinct dreams") } footer: { Text("Tap a dream to open it. Rename, split and dismiss are in List view.") }
+            Heading("\(current.name) · \(current.supportingDreams) distinct dreams")
+            ForEach(current.examples) { example in
+                NavigationLink(value: Route.dream(example.dreamId)) { ExampleCard(example: example) }.buttonStyle(.plain)
+            }
+            Hint("Tap a dream to open it. Rename, split and dismiss are on the pattern's page in List view.")
         }
     }
 }
 
-struct ExampleRow: View {
+struct FindingCard: View {
+    let finding: Finding
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Eyebrow(finding.kind == .recurring ? "Recurring theme" : "Related examples")
+            Text(finding.name).font(.heading)
+            Hint("\(finding.supportingDreams) supporting dreams")
+            ForEach(finding.examples.prefix(3)) { Text("· \($0.name)").font(.callout) }
+            if finding.status == .refreshing { Label("The explanation is being updated.", systemImage: "hourglass").font(.caption) }
+        }
+        .multilineTextAlignment(.leading)
+        .card()
+    }
+}
+
+struct ExampleCard: View {
     let example: FindingExample
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("\(example.name) · \(displayDate(example.dreamDate))").font(.subheadline.weight(.semibold))
-            Text("“\(example.excerpt)”")
-            if let shared = example.sharedElement { Text("Shared: \(shared)").font(.caption).foregroundStyle(.secondary) }
-            if let difference = example.difference { Text("Different: \(difference)").font(.caption).foregroundStyle(.secondary) }
+            Hint(shortDate(example.dreamDate))
+            Text(example.name).font(.heading)
+            Text("“\(example.excerpt)”").font(.callout).foregroundStyle(Color.muted)
+            if let shared = example.sharedElement { Hint("Shared: \(shared)") }
+            if let difference = example.difference { Hint("Different: \(difference)") }
         }
+        .multilineTextAlignment(.leading)
+        .card()
     }
 }
 
-struct FindingSection: View {
+// The prototype's pattern page: Rename, Supporting dreams, Summary & analysis; split and dismiss stay under Correct this pattern.
+struct PatternDetailView: View {
     @Environment(AppModel.self) private var app
-    let finding: Finding
-    let response: PatternsResponse
+    let groupId: String
     let model: PatternsModel
-    @State private var correcting = false
+    @State private var renaming = false
     @State private var name = ""
+    @State private var correcting = false
     @State private var moving: Set<String> = []
     @State private var newName = ""
     @State private var splitNote = ""
     @State private var confirmingSplit = false
     @State private var dismissing: FindingExample?
     @State private var dismissNote = ""
+    private var finding: Finding? { model.response?.findings.first { $0.groupId == groupId } }
     var body: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(finding.kind == .recurring ? "Recurring theme" : "Related examples").font(.caption.weight(.semibold)).foregroundStyle(Color.dusk)
-                Text("\(finding.periodCount) of \(response.eligibleDreams) eligible recorded dreams (\(displayDate(response.period.fromDate)) – \(displayDate(response.period.toDate))), in \(finding.supportingDreams) recorded dreams in all.")
-                    .font(.callout)
-                if let trend = trendText { Text(trend).font(.caption).foregroundStyle(.secondary) }
-                if finding.status == .refreshing { Label("The explanation is being updated.", systemImage: "hourglass").font(.caption) }
-                else if let explanation = finding.explanation { Text(explanation) }
-            }
-            ForEach(finding.examples) { example in NavigationLink(value: Route.dream(example.dreamId)) { ExampleRow(example: example) } }
-            if !finding.notes.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Your notes sent with this pattern").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    ForEach(finding.notes, id: \.self) { Text($0).font(.callout) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                if let error = model.error { ErrorCard(error) }
+                if let response = model.response, let finding {
+                    HStack {
+                        Eyebrow("A thread across dreams")
+                        Spacer()
+                        Button("Rename") { name = finding.label ?? ""; renaming = true }.buttonStyle(.secondary)
+                    }
+                    Text("\(finding.periodCount) of \(response.eligibleDreams) eligible recorded dreams (\(displayDate(response.period.fromDate)) – \(displayDate(response.period.toDate))), in \(finding.supportingDreams) recorded dreams in all.")
+                        .font(.callout)
+                    if let trend = trendText(finding, response) { Hint(trend) }
+                    Heading("Supporting dreams")
+                    ForEach(finding.examples) { example in
+                        NavigationLink(value: Route.dream(example.dreamId)) { ExampleCard(example: example) }.buttonStyle(.plain)
+                    }
+                    Heading("Summary & analysis")
+                    if finding.status == .refreshing { Label("The explanation is being updated.", systemImage: "hourglass").font(.callout) }
+                    else if let explanation = finding.explanation { Text(explanation).font(.callout) }
+                    else { Hint("No explanation yet.") }
+                    if !finding.notes.isEmpty {
+                        Hint("Your notes sent with this pattern")
+                        ForEach(finding.notes, id: \.self) { Text($0).font(.callout) }
+                    }
+                    ForEach(finding.dismissalNotes, id: \.dreamId) { note in
+                        HStack {
+                            Text("Dismissal note: \(note.note)").font(.callout)
+                            Spacer()
+                            Button("Remove note") { Task { await model.dismiss(app, finding, dreamId: note.dreamId, note: "") } }.buttonStyle(.quiet)
+                        }
+                    }
+                    Hint("Findings are possibilities, not proof of a shared meaning.")
+                    DisclosureGroup("Correct this pattern", isExpanded: $correcting) { corrections(finding) }.font(.callout).padding(.top, 8)
+                } else if model.response != nil {
+                    EmptyCard(title: "This pattern changed", text: "It is no longer among the findings. Go back to see the current patterns.")
                 }
             }
-            ForEach(finding.dismissalNotes, id: \.dreamId) { note in
-                HStack {
-                    Text("Dismissal note: \(note.note)").font(.callout)
-                    Spacer()
-                    Button("Remove note") { Task { await model.dismiss(app, finding, dreamId: note.dreamId, note: "") } }.buttonStyle(.borderless)
-                }
-            }
-            DisclosureGroup("Correct this pattern", isExpanded: $correcting) { corrections }
-        } header: { Text(finding.name).font(.headline).textCase(nil) }
-        .onAppear { name = finding.label ?? "" }
-        .onChange(of: finding.label) { _, value in name = value ?? "" }
-        .confirmationDialog(splitLine, isPresented: $confirmingSplit, titleVisibility: .visible) {
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .dreamPage()
+        .navigationTitle(finding?.name ?? "Pattern")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Rename pattern", isPresented: $renaming) {
+            TextField("Pattern name", text: $name)
+            Button("Save") { rename() }
+            if finding?.labelCorrected == true { Button("Use generated name") { if let finding { Task { await model.rename(app, finding, label: "") } } } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Corrections change the pattern, not your dream text.") }
+        .confirmationDialog("The dreams you move will not be grouped with the others again, in either direction. A note written with a split cannot be removed later.", isPresented: $confirmingSplit, titleVisibility: .visible) {
             Button("Save Split") {
+                guard let finding else { return }
                 Task { await model.split(app, finding, dreamIds: Array(moving), label: newName.trimmingCharacters(in: .whitespacesAndNewlines), note: splitNote); moving = []; newName = ""; splitNote = "" }
             }
         }
         .alert("Not part of this pattern?", isPresented: Binding(get: { dismissing != nil }, set: { if !$0 { dismissing = nil } }), presenting: dismissing) { example in
             TextField("Why it does not belong (optional)", text: $dismissNote)
-            Button("Dismiss", role: .destructive) { Task { await model.dismiss(app, finding, dreamId: example.dreamId, note: dismissNote); dismissNote = "" } }
+            Button("Dismiss", role: .destructive) { if let finding { Task { await model.dismiss(app, finding, dreamId: example.dreamId, note: dismissNote); dismissNote = "" } } }
             Button("Cancel", role: .cancel) {}
         } message: { example in
-            Text("“\(example.name)” will not be put back into “\(finding.name)”, and it will not be grouped again with the other \(finding.supportingDreams - 1) dreams of this theme. This cannot be taken back. A note tells later matching why, and is sent to the AI service with the group.")
+            Text("“\(example.name)” will not be put back into “\(finding?.name ?? "this pattern")”, and it will not be grouped again with the other \(max(0, (finding?.supportingDreams ?? 1) - 1)) dreams of this theme. This cannot be taken back. A note tells later matching why, and is sent to the AI service with the group.")
         }
     }
-    private var trendText: String? {
+    private func rename() {
+        guard let finding else { return }
+        let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty, label.count <= app.limits.maxLabelChars else { model.error = "Give the pattern a name of 1 to \(app.limits.maxLabelChars) characters."; return }
+        Task { await model.rename(app, finding, label: label) }
+    }
+    private func trendText(_ finding: Finding, _ response: PatternsResponse) -> String? {
         let comparison = "\(finding.periodCount) of \(response.eligibleDreams) now, \(finding.previousCount) of \(response.previousEligibleDreams) in the period before"
         return switch finding.trend {
         case .moreOftenRecordedRecently: "More often recorded recently: \(comparison)."
@@ -222,41 +279,27 @@ struct FindingSection: View {
         case .unknown, nil: nil
         }
     }
-    private var splitLine: String {
-        "The dreams you move will not be grouped with the others again, in either direction. A note written with a split cannot be removed later."
-    }
-    @ViewBuilder private var corrections: some View {
+    @ViewBuilder private func corrections(_ finding: Finding) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Pattern name", text: $name)
-            HStack {
-                Button("Save Name") { Task { await model.rename(app, finding, label: name.trimmingCharacters(in: .whitespacesAndNewlines)) } }
-                    .buttonStyle(.borderedProminent).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.count > app.limits.maxLabelChars)
-                Button("Cancel") { name = finding.label ?? "" }.buttonStyle(.bordered)
-                if finding.labelCorrected { Button("Use generated name") { Task { await model.rename(app, finding, label: "") } }.buttonStyle(.bordered) }
-            }
-            Text("Corrections change the pattern, not your dream text.").font(.caption).foregroundStyle(.secondary)
-        }
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Split: choose the dreams that belong to a separate group").font(.subheadline.weight(.semibold))
+            Text("Split: choose the dreams that belong to a separate group").font(.callout.weight(.semibold))
             ForEach(finding.examples) { example in
                 Toggle(example.name, isOn: Binding(get: { moving.contains(example.dreamId) }, set: { if $0 { moving.insert(example.dreamId) } else { moving.remove(example.dreamId) } }))
             }
-            TextField("Name of the new group (optional)", text: $newName)
-            TextField("Note: why these do not belong together (optional)", text: $splitNote)
-            Text(splitPreview).font(.caption).foregroundStyle(.secondary)
-            Button("Save Split") { confirmingSplit = true }
-                .buttonStyle(.borderedProminent)
+            TextField("Name of the new group (optional)", text: $newName).field()
+            TextField("Note: why these do not belong together (optional)", text: $splitNote).field()
+            Hint(splitPreview(finding))
+            Button("Save Split") { confirmingSplit = true }.buttonStyle(.primary)
                 .disabled(moving.isEmpty || moving.count >= finding.supportingDreams || splitNote.count > app.limits.maxPatternNoteChars)
-        }
+        }.padding(.top, 10)
         VStack(alignment: .leading, spacing: 8) {
-            Text("Dismiss a dream from this pattern").font(.subheadline.weight(.semibold))
+            Text("Dismiss a dream from this pattern").font(.callout.weight(.semibold))
             ForEach(finding.examples) { example in
-                Button("Not part of this pattern: \(example.name)") { dismissing = example }.buttonStyle(.borderless)
+                Button("Not part of this pattern: \(example.name)") { dismissing = example }.buttonStyle(.quiet)
             }
-            Text("If two different people were treated as one, correct the tag on the dream's screen, or dismiss or split here with a note.").font(.caption).foregroundStyle(.secondary)
-        }
+            Hint("If two different people were treated as one, correct the tag on the dream's screen, or dismiss or split here with a note.")
+        }.padding(.top, 10)
     }
-    private var splitPreview: String {
+    private func splitPreview(_ finding: Finding) -> String {
         let remaining = finding.supportingDreams - moving.count
         let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         return "Preview: “\(finding.name)” keeps \(remaining) dream\(remaining == 1 ? "" : "s") · “\(name.isEmpty ? "New group" : name)” gets \(moving.count) dream\(moving.count == 1 ? "" : "s"). A group with one dream is not yet recurring and is not shown."

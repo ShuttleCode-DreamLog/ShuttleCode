@@ -14,8 +14,8 @@ final class EditorTests: XCTestCase {
             }
             acknowledge.tap()
         }
-        XCTAssertTrue(app.tabBars.buttons["Life Notes"].waitForExistence(timeout: 10))
-        app.tabBars.buttons["Life Notes"].tap()
+        XCTAssertTrue(app.tabBars.buttons["Life notes"].waitForExistence(timeout: 10))
+        app.tabBars.buttons["Life notes"].tap()
         app.buttons["addNote"].tap()
         let noteText = "UI sample note \(UUID().uuidString)"
         let noteEditor = app.textViews["noteText"]
@@ -63,7 +63,8 @@ final class EditorTests: XCTestCase {
         XCTAssertFalse(app.buttons["saveJournal"].exists)
         app.buttons["Done"].tap()
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 10))
-        app.staticTexts[title].tap()
+        // A dream dated today is also the Journal's latest-dream card, so its title appears twice.
+        app.staticTexts[title].firstMatch.tap()
         XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 5))
         app.buttons["Edit Dream"].tap()
         XCTAssertTrue(journalEditor.waitForExistence(timeout: 5))
