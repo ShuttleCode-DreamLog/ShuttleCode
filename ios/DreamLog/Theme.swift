@@ -2,7 +2,8 @@ import SwiftUI
 import UIKit
 
 // DreamLog_User_Test.html visual system: ink on paper, one sage-green primary, serif headings, bordered cards and eyebrow labels.
-private func shade(_ light: UInt32, _ dark: UInt32) -> UIColor {
+// UIKit resolves a dynamic color on SwiftUI's render thread (for a Menu label, for one), so the provider must not be main-actor bound.
+private nonisolated func shade(_ light: UInt32, _ dark: UInt32) -> UIColor {
     let channel = { (hex: UInt32, shift: UInt32) in CGFloat(hex >> shift & 0xFF) / 255 }
     let color = { (hex: UInt32) in UIColor(red: channel(hex, 16), green: channel(hex, 8), blue: channel(hex, 0), alpha: 1) }
     return UIColor { $0.userInterfaceStyle == .dark ? color(dark) : color(light) }
@@ -180,8 +181,8 @@ extension ButtonStyle where Self == PrimaryButton {
 extension ButtonStyle where Self == SecondaryButton { static var secondary: SecondaryButton { SecondaryButton() } }
 extension ButtonStyle where Self == QuietButton { static var quiet: QuietButton { QuietButton() } }
 
-// Rows of pills or bubbles that wrap like inline elements.
-struct Wrap: Layout {
+// Rows of pills or bubbles that wrap like inline elements. SwiftUI may lay out off the main actor, so the layout is nonisolated.
+nonisolated struct Wrap: Layout {
     var spacing: CGFloat = 6
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         arrange(subviews, width: proposal.width ?? .infinity).size
