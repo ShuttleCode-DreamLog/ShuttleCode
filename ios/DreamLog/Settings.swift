@@ -61,7 +61,7 @@ struct DeletionView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(24)
         .dreamPage()
-        .page(Header("Delete journal"))
+        .page(Header("Delete journal"), aboveBar: false)
         .confirmationDialog("This erases everything on this phone. If the server journal still exists, you will no longer be able to open or delete it from this phone. It will be deleted when the course project ends.", isPresented: $confirmingErase, titleVisibility: .visible) {
             Button("Erase this phone only", role: .destructive) { Task { await model.erasePhone() } }
         }

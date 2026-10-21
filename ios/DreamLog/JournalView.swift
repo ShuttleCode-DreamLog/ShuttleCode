@@ -132,7 +132,7 @@ struct JournalFilterSheet: View {
                 .padding(24)
             }
             .dreamPage()
-            .page(Header("Filter dreams", leading: { BackButton(label: "Cancel") }, trailing: { EmptyView() }))
+            .page(Header("Filter dreams", leading: { BackButton(label: "Cancel") }, trailing: { EmptyView() }), aboveBar: false)
             .onAppear {
                 mood = model.filter.mood; tag = model.filter.tag ?? ""
                 fromDate = model.filter.fromDate.map(journalDay); toDate = model.filter.toDate.map(journalDay)

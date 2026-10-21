@@ -24,6 +24,8 @@ final class AppModel {
     var homeVisits = 0
     // The bar's + and Type a dream present this editor over the screen.
     var newDream: EntryRoute?
+    // The drawn bar's height: its safe-area inset does not reach the pages inside a NavigationStack, so they add it as a margin.
+    var barHeight: CGFloat = 0
     // Raised when the app returns to the foreground, the connection returns or the editor over the tabs closes; open screens run load() on it (wiki 4.4.6).
     var refreshes = 0
     // Set by "Show dreams with this tag" on a dream's screen or a mood bubble on Home; the journal takes it over as its filter.

@@ -39,7 +39,7 @@ struct DreamEditorView: View {
             .padding(24)
         }
         .dreamPage()
-        .page(header)
+        .page(header, aboveBar: false)
         .disabled(model.isSending)
         .alert("Dream title", isPresented: $renaming) {
             TextField("Dream title", text: $titleDraft)

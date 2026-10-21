@@ -63,11 +63,22 @@ struct HomeButton: View {
     }
 }
 
-extension View {
-    // A page hides the system bar behind the prototype's header, which stays put while the content scrolls.
-    func page(_ header: some View) -> some View {
-        toolbar(.hidden, for: .navigationBar).safeAreaInset(edge: .top, spacing: 0) { header }
+// A page hides the system bar behind the prototype's header, which stays put while the content scrolls, and keeps its
+// scrolling content clear of the bottom bar when it is shown inside the shell.
+private struct Page<Header: View>: ViewModifier {
+    let header: Header
+    let aboveBar: Bool
+    @Environment(AppModel.self) private var app
+    func body(content: Content) -> some View {
+        content
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) { header }
+            .contentMargins(.bottom, aboveBar ? app.barHeight : 0, for: .scrollContent)
     }
+}
+
+extension View {
+    func page(_ header: some View, aboveBar: Bool = true) -> some View { modifier(Page(header: header, aboveBar: aboveBar)) }
 }
 
 // The prototype's bottom bar: four screens and the + that opens the dream editor.
@@ -91,6 +102,7 @@ struct BottomBar: View {
         .padding(.top, 10).padding(.horizontal, 9).padding(.bottom, 4)
         .background(Color.paper.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { Rectangle().fill(Color.line).frame(height: 1) }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { app.barHeight = $0 }
     }
     private func item(_ title: String, _ icon: String, _ tab: AppTab) -> some View {
         let active = app.tab == tab && !app.showingHome

@@ -46,16 +46,16 @@ private struct BubbleView: View {
             Text(bubble.label).font(.system(size: 18, design: .serif)).foregroundStyle(Color.ink)
                 .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.6).padding(10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .glassEffect(.regular.tint(tint.opacity(chosen ? 0.9 : 0.55)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(tint.opacity(chosen ? 0.9 : 0.55)), in: .circle)
                 .overlay(Circle().strokeBorder(chosen ? Color.sage : Color.bubble, style: StrokeStyle(lineWidth: chosen ? 2 : 1, dash: bubble.dashed ? [4, 3] : [])))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(chosen ? .isSelected : [])
         .offset(reduceMotion ? .zero : afloat ? drift.1 : drift.0)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 2.8 + Double(phase % 3) * 0.6).delay(Double(phase) * 0.3).repeatForever(autoreverses: true)) { afloat = true }
-        }
+        // Scoped to the offset: a withAnimation(.repeatForever) in onAppear leaks into every transaction, including the
+        // scroll view's, which then could not be scrolled past the cluster.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 2.8 + Double(phase % 3) * 0.6).delay(Double(phase) * 0.3).repeatForever(autoreverses: true), value: afloat)
+        .onAppear { afloat = true }
     }
 }
 

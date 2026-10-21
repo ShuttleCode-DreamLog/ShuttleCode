@@ -96,7 +96,7 @@ struct NoteEditorView: View {
             .padding(24)
         }
         .dreamPage()
-        .page(header)
+        .page(header, aboveBar: !newEntry)
         .disabled(model.isSending)
         .task { await model.load(app) }
         .interactiveDismissDisabled(model.hasChanges || model.isSending || model.isAddingPhotos)

@@ -54,6 +54,6 @@ struct PrivacyNoticeView: View {
             .padding(24)
         }
         .dreamPage()
-        .page(Header("Privacy notice"))
+        .page(Header("Privacy notice"), aboveBar: false)
     }
 }
