@@ -7,6 +7,7 @@ final class JournalModel {
     var drafts: [Draft] = []
     var filter = JournalFilter()
     var hasMore = false
+    var ranked = false
     var error: String?
     var isLoading = false
     var rows: [JournalRow] {
@@ -35,7 +36,7 @@ final class JournalModel {
         case let .success(page):
             let existing = Set(items.map(\.id))
             items = more ? items + page.items.filter { !existing.contains($0.id) } : page.items
-            hasMore = page.hasMore; error = nil
+            hasMore = page.hasMore; ranked = page.ranked ?? false; error = nil
         case let .failure(failure):
             if !more { items = [] }
             hasMore = false; error = failure.message

@@ -162,6 +162,7 @@ final class APIClient {
         return result.map(\.task)
     }
     func loadPatterns() async -> Result<PatternsResponse, APIError> { decode(await response(method: "GET", path: "v1/patterns")) }
+    func loadTags() async -> Result<TagList, APIError> { decode(await response(method: "GET", path: "v1/tags")) }
     func labelPattern(_ groupID: String, _ value: PatternLabel) async -> Result<PatternsResponse, APIError> {
         await send("PUT", "v1/patterns/groups/\(groupID)/label", value)
     }

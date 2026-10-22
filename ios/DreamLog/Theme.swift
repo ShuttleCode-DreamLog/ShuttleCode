@@ -86,10 +86,11 @@ struct Hint: View {
 struct Pill: View {
     let text: String
     var struck = false
-    init(_ text: String, struck: Bool = false) { self.text = text; self.struck = struck }
+    var selected = false
+    init(_ text: String, struck: Bool = false, selected: Bool = false) { self.text = text; self.struck = struck; self.selected = selected }
     var body: some View {
-        Text(text).strikethrough(struck).font(.caption2).foregroundStyle(struck ? Color.muted : Color.ink)
-            .padding(.horizontal, 9).padding(.vertical, 3).background(Color.soft, in: Capsule())
+        Text(text).strikethrough(struck).font(.caption2).foregroundStyle(selected ? .white : struck ? Color.muted : Color.ink)
+            .padding(.horizontal, 9).padding(.vertical, 3).background(selected ? Color.sage : Color.soft, in: Capsule())
     }
 }
 

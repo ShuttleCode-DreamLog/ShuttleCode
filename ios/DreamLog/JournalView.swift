@@ -1,5 +1,7 @@
 import SwiftUI
 
+// The search box takes free wording; Filter narrows the journal by the tags, feeling and dates that exist in it, and the
+// wording then ranks what is left by meaning (API.md, search).
 struct JournalView: View {
     @Environment(AppModel.self) private var app
     @State private var model = JournalModel()
@@ -37,7 +39,7 @@ struct JournalView: View {
             .dreamPage()
             .page(Header("Journal") { HomeButton() })
             .routeDestinations()
-            .sheet(isPresented: $filtering) { JournalFilterSheet(model: model) }
+            .sheet(isPresented: $filtering) { JournalFilterSheet(model: model, query: query) }
             .reloadable { await model.load(app) }
             .task { await model.load(app) }
             .onChange(of: query) { _, value in
@@ -48,7 +50,7 @@ struct JournalView: View {
             .onChange(of: app.requestedTag, initial: true) { _, requested in
                 guard let requested else { return }
                 app.requestedTag = nil
-                model.filter.tag = requested
+                model.filter.tags = [requested]
                 if path.isEmpty { Task { await model.load(app) } } else { path = [] }
             }
             .onChange(of: app.requestedMood, initial: true) { _, requested in
@@ -61,17 +63,17 @@ struct JournalView: View {
     }
     private func search() {
         guard !model.isLoading else { return }
-        model.filter.query = query
+        model.filter.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         Task { await model.load(app) }
     }
     private var countLine: String {
         let count = model.rows.count
         let entries = "\(count)\(model.hasMore ? "+" : "") \(count == 1 ? "entry" : "entries")"
         let filter = model.filter
-        let parts = [filter.query.isEmpty ? nil : "matching “\(filter.query)”", filter.mood.map { "feeling \($0.rawValue)" },
+        let parts = [filter.tags.isEmpty ? nil : "tagged " + filter.tags.map { "“\($0)”" }.joined(separator: ", "), filter.mood.map { "feeling \($0.rawValue)" },
                      filter.fromDate.map { "from \(displayDate($0))" }, filter.toDate.map { "to \(displayDate($0))" },
-                     filter.tag.map { "tagged “\($0)”" }].compactMap(\.self)
-        return (parts.isEmpty ? "All dreams" : "Dreams \(parts.joined(separator: " "))") + " · \(entries)"
+                     filter.query.isEmpty ? nil : "matching “\(filter.query)”"].compactMap(\.self)
+        return (parts.isEmpty ? "All dreams" : "Dreams \(parts.joined(separator: " "))") + " · \(entries)" + (model.ranked ? " · by similarity" : "")
     }
 }
 
@@ -101,12 +103,15 @@ struct DreamCard: View {
     }
 }
 
+// Everything here is chosen from what the journal holds; the tags come from the server's list and change as the journal does.
 struct JournalFilterSheet: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let model: JournalModel
+    let query: String
     @State private var mood: Mood?
-    @State private var tag = ""
+    @State private var chosen: Set<String> = []
+    @State private var available: [TagCount] = []
     @State private var fromDate: Date?
     @State private var toDate: Date?
     var body: some View {
@@ -119,13 +124,21 @@ struct JournalFilterSheet: View {
                             ForEach(Mood.allCases.filter { $0 != .unknown }, id: \.self) { Text($0.rawValue.capitalized).tag(Optional($0)) }
                         }.labelsHidden()
                     }
-                    TextField("Tag", text: $tag).field().autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Hint("Tags")
+                    if available.isEmpty && chosen.isEmpty { Hint("No tags yet") }
+                    Wrap(spacing: 6) {
+                        ForEach(tags, id: \.self) { tag in
+                            Button { if chosen.contains(tag) { chosen.remove(tag) } else { chosen.insert(tag) } } label: { Pill(tag, selected: chosen.contains(tag)) }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(chosen.contains(tag) ? .isSelected : [])
+                        }
+                    }
                     dateRow("From", date: $fromDate)
                     dateRow("To", date: $toDate)
                     HStack(spacing: 10) {
                         Button("Apply") { apply(); dismiss() }.buttonStyle(.primary)
                         Button("Clear") { clear(); dismiss() }.buttonStyle(.secondary)
-                            .disabled(model.filter.tag == nil && model.filter.mood == nil && model.filter.fromDate == nil && model.filter.toDate == nil)
+                            .disabled(model.filter.tags.isEmpty && model.filter.mood == nil && model.filter.fromDate == nil && model.filter.toDate == nil)
                     }.padding(.top, 8)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -133,13 +146,16 @@ struct JournalFilterSheet: View {
             }
             .dreamPage()
             .page(Header("Filter dreams", leading: { BackButton(label: "Cancel") }, trailing: { EmptyView() }), aboveBar: false)
-            .onAppear {
-                mood = model.filter.mood; tag = model.filter.tag ?? ""
+            .task {
+                mood = model.filter.mood; chosen = Set(model.filter.tags)
                 fromDate = model.filter.fromDate.map(journalDay); toDate = model.filter.toDate.map(journalDay)
+                if let client = app.client, case let .success(list) = await client.loadTags() { available = list.tags }
             }
         }
         .presentationDetents([.medium, .large])
     }
+    // Tags that were chosen but are no longer on any dream stay visible until they are cleared.
+    private var tags: [String] { available.map(\.text) + chosen.filter { tag in !available.contains { $0.text == tag } }.sorted() }
     @ViewBuilder private func dateRow(_ title: String, date: Binding<Date?>) -> some View {
         Toggle("\(title) date", isOn: Binding(get: { date.wrappedValue != nil }, set: { date.wrappedValue = $0 ? .now : nil })).font(.callout).switchRow()
         if let value = date.wrappedValue {
@@ -149,15 +165,15 @@ struct JournalFilterSheet: View {
         }
     }
     private func apply() {
-        let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
-        model.filter.tag = trimmed.isEmpty ? nil : trimmed
+        model.filter.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        model.filter.tags = tags.filter { chosen.contains($0) }
         model.filter.mood = mood
         model.filter.fromDate = fromDate.map { journalDate($0) }
         model.filter.toDate = toDate.map { journalDate($0) }
         Task { await model.load(app) }
     }
     private func clear() {
-        model.filter.tag = nil; model.filter.mood = nil; model.filter.fromDate = nil; model.filter.toDate = nil
+        model.filter.tags = []; model.filter.mood = nil; model.filter.fromDate = nil; model.filter.toDate = nil
         Task { await model.load(app) }
     }
 }

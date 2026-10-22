@@ -702,3 +702,27 @@ async def test_embed_adapter_request_scaling_and_errors(endpoint, monkeypatch, c
     with pytest.raises(providers.ProviderError) as raised:
         await providers.embed(['a', 'b', 'c', 'd'])
     assert raised.value.category == 'network' and 'secret-key-value' not in caplog.text
+
+
+async def test_search_narrows_by_every_tag_then_ranks_by_meaning(client, clock, ai):
+    headers, user = person()
+    lake = await journal(client, headers, 'A quiet lake at dawn.')
+    train = await journal(client, headers, 'A train through the station.')
+    spoken = await journal(client, headers, 'I only said the words quiet lake on a train.', permissions={'patterns': False})
+    await organized(user, lake, [('place', 'lake', 'lake'), ('emotion', 'calm', 'quiet')])
+    await organized(user, train, [('object', 'train', 'train')])
+    while await tasks.run_once():
+        pass
+    assert (await client.get('/v1/tags', headers=headers)).json()['tags'] == [{'category': 'emotion', 'text': 'calm', 'count': 1}, {'category': 'place', 'text': 'lake', 'count': 1}, {'category': 'object', 'text': 'train', 'count': 1}]
+    found = (await client.post('/v1/dreams/search', headers=headers, json={'query': 'quiet lake'})).json()
+    # The lake dream by meaning first, then the dream that only carries the words and has no vector; the train dream is too far.
+    assert found['ranked'] and [(item['id'], item['similarity'] is not None) for item in found['items']] == [(lake, True), (spoken, False)]
+    assert found['items'][0]['similarity'] > 0.5
+    assert [i['id'] for i in (await client.post('/v1/dreams/search', headers=headers, json={'tags': ['lake']})).json()['items']] == [lake]
+    assert (await client.post('/v1/dreams/search', headers=headers, json={'tags': ['lake', 'train']})).json()['items'] == []
+    assert [i['id'] for i in (await client.post('/v1/dreams/search', headers=headers, json={'query': 'quiet lake', 'tags': ['LAKE ']})).json()['items']] == [lake]
+    # Without an allowance for the embedding the search keeps working on the literal words, in journal order.
+    await db.rwdb.execute("UPDATE usage SET count=? WHERE user_id=? AND kind='text'", (config.CAPS['text'], user))
+    literal = (await client.post('/v1/dreams/search', headers=headers, json={'query': 'quiet lake'})).json()
+    # The frozen clock gives both dreams one creation time, so their literal order comes down to their random IDs.
+    assert not literal['ranked'] and sorted(i['id'] for i in literal['items']) == sorted([spoken, lake]) and {i['similarity'] for i in literal['items']} == {None}

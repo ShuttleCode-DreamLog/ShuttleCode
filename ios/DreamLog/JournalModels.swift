@@ -124,16 +124,19 @@ nonisolated struct JournalItem: Codable, Sendable, Identifiable {
     var updatedAt: Date
 }
 
-nonisolated struct JournalPage: Decodable { var items: [JournalItem]; var hasMore: Bool }
+nonisolated struct JournalPage: Decodable { var items: [JournalItem]; var hasMore: Bool; var ranked: Bool? }
+nonisolated struct TagCount: Codable, Sendable, Identifiable { var category: TagCategory; var text: String; var count: Int; var id: String { text } }
+nonisolated struct TagList: Decodable { var tags: [TagCount] }
 nonisolated struct DreamResponse: Decodable { var dream: Dream }
 
+// Tags, mood and dates narrow the journal; the query then ranks what is left by meaning (API.md, search).
 nonisolated struct JournalFilter: Encodable, Equatable {
     var query = ""
-    var tag: String?
+    var tags: [String] = []
     var mood: Mood?
     var fromDate: String?
     var toDate: String?
-    var isEmpty: Bool { query.isEmpty && tag == nil && mood == nil && fromDate == nil && toDate == nil }
+    var isEmpty: Bool { query.isEmpty && tags.isEmpty && mood == nil && fromDate == nil && toDate == nil }
 }
 
 nonisolated struct Draft: Codable, Sendable {

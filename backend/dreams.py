@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -56,6 +57,7 @@ class Correction(msgspec.Struct):
 class JournalFilter(msgspec.Struct):
     query: str = ''
     tag: str | None = None
+    tags: list[str] = []
     mood: str | None = None
     from_date: str | None = None
     to_date: str | None = None
@@ -112,8 +114,30 @@ async def tag_lists(identity, dreams):
     return lists
 
 
-def journal_item(row, status, summary, tags):
-    return {**{key: row[key] for key in ('id', 'dream_date', 'title', 'mood', 'revision', 'audio_status', 'updated_at')}, 'preview': row['text'][:200], 'summary': summary, 'tags': tags, 'status': status, 'favorite_visual_id': None}
+def journal_item(row, status, summary, tags, similarity=None):
+    return {**{key: row[key] for key in ('id', 'dream_date', 'title', 'mood', 'revision', 'audio_status', 'updated_at')}, 'preview': row['text'][:200], 'summary': summary, 'tags': tags, 'similarity': similarity, 'status': status, 'favorite_visual_id': None}
+
+
+async def list_tags(request):
+    # The tags a user can filter by: every effective tag of a current organization, most frequent first.
+    identity = await resolve_user(request)
+    rows = await db.rwdb.execute_fetchall("SELECT category,text,count(DISTINCT dream_id) AS count FROM effective_tags WHERE user_id=? AND output_status='current' GROUP BY category,text ORDER BY count DESC,text", (identity,))
+    return json_response({'tags': [{'category': row['category'], 'text': row['text'], 'count': row['count']} for row in rows]})
+
+
+# Wording in the search box is embedded once and compared with the dreams' vectors (wiki 4.8.3); the distance is the cosine
+# distance, so 0 is the same meaning. None means the search falls back to the dreams' literal words: the vector extension is
+# missing, the day's text allowance is used up, or the embedding call failed.
+async def similarities(identity, query):
+    if not db.vectors or await records.charge(identity, 'text'):
+        return None
+    try:
+        [vector] = await providers.embed([query], timeout=20)
+    except providers.ProviderError:
+        return None
+    rows = await db.rwdb.execute_fetchall("SELECT dv.dream_id,v.distance FROM dream_vectors AS dv JOIN vector_full_scan('dream_vectors','embedding',vector_as_f32(?)) AS v ON dv.rowid=v.rowid WHERE dv.user_id=? AND dv.model=? AND dv.dimensions=?",
+                                          (json.dumps(vector), identity, os.environ['EMBEDDING_MODEL'], config.EMBEDDING_DIMENSIONS))
+    return {row['dream_id']: row['distance'] for row in rows}
 
 
 async def owned_dream(identity, dream_id):
@@ -280,8 +304,10 @@ async def page(request, identity, filters):
     clauses, values = ['d.user_id=?'], [identity]
     if len(filters.query) > config.LIMITS['max_message_chars']:
         raise RequestError(413, 'too_large', 'Search text is too long.')
-    if filters.query:
-        pattern = '%' + filters.query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+    query = filters.query.strip()
+    ranked = await similarities(identity, query) if query else None
+    if query and ranked is None:
+        pattern = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
         clauses.append("(d.text LIKE ? ESCAPE '\\' OR d.title LIKE ? ESCAPE '\\')")
         values.extend((pattern, pattern))
     if filters.mood is not None:
@@ -296,12 +322,25 @@ async def page(request, identity, filters):
             values.append(field)
     if filters.from_date and filters.to_date and filters.from_date > filters.to_date:
         raise RequestError(400, 'invalid_request', 'Start date must not be after end date.')
-    if filters.tag is not None:
+    # Every chosen tag narrows the dreams; a dream must carry all of them.
+    for tag in [*filters.tags, *([filters.tag] if filters.tag is not None else [])]:
         clauses.append("EXISTS(SELECT 1 FROM effective_tags t WHERE t.dream_id=d.id AND t.user_id=d.user_id AND t.text=? AND t.output_status='current')")
-        values.append(' '.join(filters.tag.lower().split()))
-    rows = await db.rwdb.execute_fetchall(f"SELECT d.* FROM dreams d WHERE {' AND '.join(clauses)} ORDER BY d.dream_date DESC,d.created_at DESC,d.id ASC LIMIT ? OFFSET ?", (*values, limit + 1, offset))
-    statuses, found, tags = await tasks.journal_statuses(identity, rows[:limit]), await summaries(identity, rows[:limit]), await tag_lists(identity, rows[:limit])
-    return json_response({'items': [journal_item(row, statuses[row['id']], found.get(row['id']), tags.get(row['id'], [])) for row in rows[:limit]], 'has_more': len(rows) > limit})
+        values.append(' '.join(tag.lower().split()))
+    order = f"SELECT d.* FROM dreams d WHERE {' AND '.join(clauses)} ORDER BY d.dream_date DESC,d.created_at DESC,d.id ASC"
+    if ranked is None:
+        rows = await db.rwdb.execute_fetchall(f'{order} LIMIT ? OFFSET ?', (*values, limit + 1, offset))
+        page_rows, more, distances = rows[:limit], len(rows) > limit, {}
+    else:
+        # The narrowed dreams in order of meaning: close enough by vector, or carrying the words literally when no vector can say.
+        words = query.lower()
+        rows = [row for row in await db.rwdb.execute_fetchall(order, values)
+                if ranked.get(row['id'], 2.0) <= config.SEARCH_MAX_DISTANCE or words in row['text'].lower() or words in (row['title'] or '').lower()]
+        rows.sort(key=lambda row: ranked.get(row['id'], 1.0))
+        page_rows, more = rows[offset:offset + limit], len(rows) > offset + limit
+        distances = {row['id']: ranked[row['id']] for row in page_rows if row['id'] in ranked}
+    statuses, found, tags = await tasks.journal_statuses(identity, page_rows), await summaries(identity, page_rows), await tag_lists(identity, page_rows)
+    items = [journal_item(row, statuses[row['id']], found.get(row['id']), tags.get(row['id'], []), round(1 - distances[row['id']], 3) if row['id'] in distances else None) for row in page_rows]
+    return json_response({'items': items, 'has_more': more, 'ranked': ranked is not None})
 
 
 async def list_dreams(request):

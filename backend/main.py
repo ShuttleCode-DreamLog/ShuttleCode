@@ -19,7 +19,7 @@ import db
 import patterns
 import providers
 import tasks
-from dreams import delete_dream, get_dream, list_dreams, save_correction, save_dream, save_permissions, search_dreams
+from dreams import delete_dream, get_dream, list_dreams, list_tags, save_correction, save_dream, save_permissions, search_dreams
 from memories import delete_memory, get_memory, list_memories, save_memory
 from profiles import get_profile, save_profile
 from photos import delete_photo, get_photo, save_photo
@@ -100,6 +100,7 @@ routes.extend([
     Route("/v1/memories/{memory_id}", delete_memory, methods=["DELETE"]),
     Route("/v1/dreams", list_dreams, methods=["GET"]),
     Route("/v1/dreams/search", search_dreams, methods=["POST"]),
+    Route("/v1/tags", list_tags, methods=["GET"]),
     Route("/v1/dreams/{dream_id}", get_dream, methods=["GET"]),
     Route("/v1/dreams/{dream_id}", save_dream, methods=["PUT"]),
     Route("/v1/dreams/{dream_id}", delete_dream, methods=["DELETE"]),
