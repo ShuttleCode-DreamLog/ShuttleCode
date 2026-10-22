@@ -53,4 +53,20 @@ From 16 October 2026 the server runs the `skeletal_draft` branch instead, so the
 
 On 21 October 2026 the server was updated to `skeletal_draft` at `e571f10` (`git pull --ff-only`, `uv sync --locked`, `systemctl restart dreamlog`): the restart raised the database to schema version 6 by adding `memories.title`, and journal items now carry `tags`. A throwaway user then saved a note whose title came back trimmed and read a journal item with its `tags` key, and was deleted with `DELETE /v1/me`; the log shows no error.
 
+## Who can deploy
+
+Checked on 21 October 2026. The VM has one login account, `ubuntu`, which is in the `sudo` and `google-sudoers` groups with passwordless sudo. Its `authorized_keys` holds four ed25519 keys managed through the GCP instance metadata: the owner's and three teammates'. Everyone who holds one of them logs in as `ubuntu`, so each can restart the service, edit `/home/ubuntu/.env.sys` and read or change the SQLite database in `/home/ubuntu/dreamlog-data`; the shared account leaves no record of who did what, and the privacy notice's "operators can read" means these four people. Moving to OS Login (per Google account, with its own sudo control) would separate them; that is a change for the team to decide.
+
+The server holds no GitHub key: `/home/ubuntu/dreamlog` pulls from `git@github.com:ShuttleCode-DreamLog/ShuttleCode.git` with the deployer's own key forwarded. A deployer therefore needs collaborator access to the repository and connects with `ssh -A`. Deploy steps:
+
+```sh
+ssh -A ubuntu@34.66.84.214
+cd ~/dreamlog && git pull --ff-only   # tracks skeletal_draft; run git switch foundation first to deploy foundation
+cd backend && uv sync --locked         # uv is in ~/.local/bin
+sudo systemctl restart dreamlog
+sudo journalctl -fu dreamlog           # the database upgrade runs at startup; no vectors_unavailable line should appear
+```
+
+A restart interrupts in-flight AI tasks, which the worker retries. Deploy only commits whose backend tests pass, and never put a key or a real journal in a commit.
+
 On 16 October 2026 the AI calls moved from the Gemini API (an AI Studio key) to Vertex AI in the same Google Cloud project, `dreamlog-511515`, which differs from wiki 4.1. The free-tier key's text model answered 503 "high demand" on every attempt that day, and the project's $300 Google Cloud free-trial credit pays for Vertex AI but not for the Gemini API. Google Cloud's terms also keep Google from training its models on what is sent. `providers.py` uses Vertex AI's OpenAI-compatible chat endpoint and the `predict` embedding endpoint, both at location `global`, with the same `TEXT_MODEL` (`gemini-3.1-flash-lite`, sent as `google/gemini-3.1-flash-lite`) and `EMBEDDING_MODEL` (`gemini-embedding-001`, one text per request, 768 values). Trial calls that day: both answered, the text model with the organize JSON schema; `gemini-3.5-flash` took longer than 60 seconds. There is no key: the server takes an hour-long token for the VM's service account `321216771220-compute@developer.gserviceaccount.com` from the metadata server and keeps it until a minute before it expires. That account holds `roles/editor`, which includes Vertex AI, and the Vertex AI API was already enabled; the VM's access scope must include `cloud-platform` (changed with the VM stopped; 34.66.84.214 is the reserved address `dreamlog-backend`, so it survives the restart). `.env.sys` needs `VERTEX_PROJECT=dreamlog-511515`; `GEMINI_API_KEY` is no longer read. A refused or missing token fails as `provider_config` like a refused key did.
