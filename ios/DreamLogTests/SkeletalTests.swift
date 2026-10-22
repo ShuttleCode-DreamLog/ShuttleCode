@@ -32,7 +32,9 @@ extension FoundationTests {
          "findings": [{"group_id": "g1", "label": null, "label_corrected": false, "kind": "recurring", "status": "refreshing", "explanation": null,
                        "supporting_dreams": 3, "period_count": 3, "previous_count": 0, "trend": "brand_new_trend",
                        "examples": [{"dream_id": "d1", "dream_date": "2026-10-13", "title": null, "category": "action", "description": "missing the bus",
-                                     "excerpt": "The bus kept leaving", "shared_element": "a vehicle departing", "difference": null}],
+                                     "excerpt": "The bus kept leaving", "shared_element": "a vehicle departing", "difference": null},
+                                    {"dream_id": "d1", "dream_date": "2026-10-13", "title": null, "category": "object", "description": "a bus",
+                                     "excerpt": "The bus kept leaving", "shared_element": "a vehicle", "difference": null}],
                        "notes": ["Different drivers"], "dismissal_notes": [{"dream_id": "d4", "note": "Different drivers"}]}],
          "insufficient_history": false,
          "task": {"id": "t9", "type": "refresh_findings", "status": "failed", "error_code": "rate_limited", "dream_id": null, "subject_id": null, "source_revision": null, "updated_at": 1760371200000}}
@@ -81,6 +83,7 @@ extension FoundationTests {
         let patterns = try serverDecoder().decode(PatternsResponse.self, from: patternsJSON)
         let finding = try #require(patterns.findings.first)
         #expect(finding.name == "Unnamed theme" && finding.status == .refreshing && finding.trend == .unknown)
+        #expect(finding.examples.count == 2 && finding.dreams.map(\.dreamId) == ["d1"])
         #expect(patterns.task?.type == .refreshFindings && patterns.task?.status == .failed)
     }
 

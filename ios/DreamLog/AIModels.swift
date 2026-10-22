@@ -122,6 +122,8 @@ nonisolated struct Finding: Codable, Sendable, Identifiable {
     var dismissalNotes: [DismissalNote]
     var id: String { groupId }
     var name: String { label ?? "Unnamed theme" }
+    // The server lists one example per matched tag, so a dream with two tags in the group comes twice; the screens act per dream.
+    var dreams: [FindingExample] { var seen = Set<String>(); return examples.filter { seen.insert($0.dreamId).inserted } }
 }
 
 nonisolated struct PatternsResponse: Codable, Sendable {

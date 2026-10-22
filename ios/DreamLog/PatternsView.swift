@@ -122,7 +122,7 @@ struct PatternsView: View {
             .padding(.vertical, 8)
         if let current {
             Heading("\(current.name) · \(current.supportingDreams) distinct dreams")
-            ForEach(current.examples) { example in
+            ForEach(current.dreams) { example in
                 NavigationLink(value: Route.dream(example.dreamId)) { ExampleCard(example: example) }.buttonStyle(.plain)
             }
         }
@@ -136,7 +136,7 @@ struct FindingCard: View {
             Eyebrow(finding.kind == .recurring ? "Recurring theme" : "Related examples")
             Text(finding.name).font(.heading)
             Hint("\(finding.supportingDreams) supporting dreams")
-            ForEach(finding.examples.prefix(3)) { Text("· \($0.name)").font(.callout) }
+            ForEach(finding.dreams.prefix(3)) { Text("· \($0.name)").font(.callout) }
             if finding.status == .refreshing { Label("The explanation is being updated.", systemImage: "hourglass").font(.caption) }
         }
         .multilineTextAlignment(.leading)
@@ -196,7 +196,7 @@ struct PatternDetailView: View {
                         .font(.callout)
                     if let trend = trendText(finding, response) { Hint(trend) }
                     Heading("Supporting dreams")
-                    ForEach(finding.examples) { example in
+                    ForEach(finding.dreams) { example in
                         NavigationLink(value: Route.dream(example.dreamId)) { ExampleCard(example: example) }.buttonStyle(.plain)
                     }
                     Heading("Summary & analysis")
@@ -239,6 +239,7 @@ struct PatternDetailView: View {
         .alert("Not part of this pattern?", isPresented: Binding(get: { dismissing != nil }, set: { if !$0 { dismissing = nil } }), presenting: dismissing) { example in
             TextField("Why it does not belong (optional)", text: $dismissNote)
             Button("Dismiss", role: .destructive) { if let finding { Task { await model.dismiss(app, finding, dreamId: example.dreamId, note: dismissNote); dismissNote = "" } } }
+                .disabled(dismissNote.count > app.limits.maxPatternNoteChars)
             Button("Cancel", role: .cancel) {}
         } message: { example in
             Text("“\(example.name)” will not be put back into “\(finding?.name ?? "this pattern")”, and it will not be grouped again with the other \(max(0, (finding?.supportingDreams ?? 1) - 1)) dreams of this theme. This cannot be taken back. A note tells later matching why, and is sent to the AI service with the group.")
@@ -262,7 +263,7 @@ struct PatternDetailView: View {
     @ViewBuilder private func corrections(_ finding: Finding) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Split: choose the dreams that belong to a separate group").font(.callout.weight(.semibold))
-            ForEach(finding.examples) { example in
+            ForEach(finding.dreams) { example in
                 Toggle(example.name, isOn: Binding(get: { moving.contains(example.dreamId) }, set: { if $0 { moving.insert(example.dreamId) } else { moving.remove(example.dreamId) } }))
             }
             TextField("Name of the new group (optional)", text: $newName).field()
@@ -273,7 +274,7 @@ struct PatternDetailView: View {
         }.padding(.top, 10)
         VStack(alignment: .leading, spacing: 8) {
             Text("Dismiss a dream from this pattern").font(.callout.weight(.semibold))
-            ForEach(finding.examples) { example in
+            ForEach(finding.dreams) { example in
                 Button("Not part of this pattern: \(example.name)") { dismissing = example }.buttonStyle(.quiet)
             }
         }.padding(.top, 10)
