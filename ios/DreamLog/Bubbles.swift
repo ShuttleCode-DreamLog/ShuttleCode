@@ -7,7 +7,7 @@ struct Bubble: Identifiable {
     var dashed = false
 }
 
-// Translucent glass bubbles packed into one cluster, each drifting a little like a real bubble: the Garden of patterns on
+// Translucent tinted bubbles packed into one cluster, each drifting a little like a real bubble: the Garden of patterns on
 // Home and on the Patterns screen.
 struct BubbleCluster: View {
     let bubbles: [Bubble]
@@ -15,12 +15,10 @@ struct BubbleCluster: View {
     let select: (String) -> Void
     private static let tints: [Color] = [.tintYellow, .tintGreen, .tintBlue, .tintLavender, .tintPeach]
     var body: some View {
-        GlassEffectContainer(spacing: 0) {
-            ClusterLayout {
-                ForEach(Array(bubbles.enumerated()), id: \.element.id) { index, bubble in
-                    BubbleView(bubble: bubble, tint: Self.tints[index % Self.tints.count], chosen: bubble.id == selected, phase: index) { select(bubble.id) }
-                        .layoutValue(key: ClusterLayout.Weight.self, value: bubble.weight)
-                }
+        ClusterLayout {
+            ForEach(Array(bubbles.enumerated()), id: \.element.id) { index, bubble in
+                BubbleView(bubble: bubble, tint: Self.tints[index % Self.tints.count], chosen: bubble.id == selected, phase: index) { select(bubble.id) }
+                    .layoutValue(key: ClusterLayout.Weight.self, value: bubble.weight)
             }
         }
         .frame(maxWidth: .infinity)
@@ -46,8 +44,13 @@ private struct BubbleView: View {
             Text(bubble.label).font(.system(size: 18, design: .serif)).foregroundStyle(Color.ink)
                 .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.6).padding(10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .glassEffect(.regular.tint(tint.opacity(chosen ? 0.9 : 0.55)), in: .circle)
-                .overlay(Circle().strokeBorder(chosen ? Color.sage : Color.bubble, style: StrokeStyle(lineWidth: chosen ? 2 : 1, dash: bubble.dashed ? [4, 3] : [])))
+                .background {
+                    // Fill, highlight and rim are one shape, so they move and redraw together; Liquid Glass drew its disc in a
+                    // shared layer that did not follow the drift, leaving the rim beside the bubble.
+                    Circle().fill(tint.opacity(chosen ? 0.85 : 0.55))
+                        .overlay(Circle().fill(.linearGradient(colors: [.white.opacity(0.55), .clear], startPoint: .topLeading, endPoint: .center)))
+                        .overlay(Circle().strokeBorder(chosen ? Color.sage : Color.bubble, style: StrokeStyle(lineWidth: chosen ? 2 : 1, dash: bubble.dashed ? [4, 3] : [])))
+                }
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(chosen ? .isSelected : [])
