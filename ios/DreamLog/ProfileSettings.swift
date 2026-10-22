@@ -58,44 +58,30 @@ final class ProfileModel {
         case let .failure(failure): error = failure.message
         }
     }
-    func save(_ app: AppModel) async {
-        guard let stored, !isSaving, !isLoading, !conflict, app.noticeSeen, !app.deleting, !app.savingSettings, let client = app.client else { return }
+    @discardableResult func save(_ app: AppModel) async -> Bool {
+        guard let stored, !isSaving, !isLoading, !conflict, app.noticeSeen, !app.deleting, !app.savingSettings, let client = app.client else { return false }
         isSaving = true; app.savingSettings = true
         defer { isSaving = false; app.savingSettings = false }
         let epoch = app.journalEpoch
         let result = await client.saveProfile(ProfileSave(baseRevision: stored.revision, fields: fields))
-        guard epoch == app.journalEpoch, !app.deleting else { return }
+        guard epoch == app.journalEpoch, !app.deleting else { return false }
         switch result {
-        case let .success(profile): self.stored = profile; fields = profile.fields; error = nil
-        case let .failure(failure): conflict = failure.code == "revision_conflict"; error = failure.message
+        case let .success(profile): self.stored = profile; fields = profile.fields; error = nil; return true
+        case let .failure(failure): conflict = failure.code == "revision_conflict"; error = failure.message; return false
         }
     }
 }
 
+// Saved fields read as a table with Edit; the form shows for a first profile, after Edit, and until Save succeeds.
 struct ProfileSettings: View {
     @Environment(AppModel.self) private var app
     @State private var model = ProfileModel()
+    @State private var editing = false
     @State private var addingField = false
     @State private var fieldKey = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Profile").font(.heading)
-            ForEach(model.keys, id: \.self) { key in
-                let field = profileFields.first { $0.key == key }
-                HStack(spacing: 8) {
-                    TextField(field?.title ?? key.replacingOccurrences(of: "_", with: " ").capitalized, text: Binding(get: { model.fields[key] ?? "" }, set: { model.fields[key] = $0 }), prompt: Text(field?.title ?? key))
-                        .keyboardType(field?.numeric == true ? .numberPad : .default)
-                        .accessibilityIdentifier("profile_\(key)")
-                        .field()
-                    Button("Remove \(field?.title ?? key)", systemImage: "minus.circle", role: .destructive) { model.fields.removeValue(forKey: key) }
-                        .labelStyle(.iconOnly).buttonStyle(.quiet)
-                }
-            }
-            HStack(spacing: 10) {
-                Button("Add field", systemImage: "plus") { fieldKey = ""; addingField = true }.buttonStyle(.secondary)
-                Button("Save profile") { Task { await model.save(app) } }.buttonStyle(.primary)
-                    .disabled(model.stored == nil || model.isLoading || model.conflict)
-            }
+            if editing || model.stored?.fields.isEmpty ?? true { form } else { table }
             if model.isLoading || model.isSaving { ProgressView() }
             if let error = model.error { Text(error).font(.callout).foregroundStyle(Color.danger) }
             if model.conflict {
@@ -118,5 +104,41 @@ struct ProfileSettings: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { Text("For example: Hometown or Favorite color.") }
+    }
+    private func title(_ key: String) -> String { profileFields.first { $0.key == key }?.title ?? key.replacingOccurrences(of: "_", with: " ").capitalized }
+    @ViewBuilder private var table: some View {
+        HStack {
+            Text("Profile").font(.heading)
+            Spacer()
+            Button("Edit") { model.fields = model.stored?.fields ?? [:]; editing = true }.buttonStyle(.secondary).accessibilityIdentifier("editProfile")
+        }
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(model.keys.filter { !(model.stored?.fields[$0] ?? "").isEmpty }, id: \.self) { key in
+                LabeledRow(title(key)) { Text(model.stored?.fields[key] ?? "").font(.callout).multilineTextAlignment(.trailing) }
+            }
+        }
+    }
+    @ViewBuilder private var form: some View {
+        Text("Profile").font(.heading)
+        ForEach(model.keys, id: \.self) { key in
+            let field = profileFields.first { $0.key == key }
+            HStack(spacing: 8) {
+                TextField(title(key), text: Binding(get: { model.fields[key] ?? "" }, set: { model.fields[key] = $0 }), prompt: Text(title(key)))
+                    .keyboardType(field?.numeric == true ? .numberPad : .default)
+                    .accessibilityIdentifier("profile_\(key)")
+                    .field()
+                Button("Remove \(title(key))", systemImage: "minus.circle", role: .destructive) { model.fields.removeValue(forKey: key) }
+                    .labelStyle(.iconOnly).buttonStyle(.quiet)
+            }
+        }
+        Button("Add field", systemImage: "plus") { fieldKey = ""; addingField = true }.buttonStyle(.secondary)
+        HStack(spacing: 10) {
+            if model.stored?.fields.isEmpty == false {
+                Button("Cancel") { model.fields = model.stored?.fields ?? [:]; model.error = nil; editing = false }.buttonStyle(.secondary)
+            }
+            Button("Save profile") { Task { if await model.save(app) { editing = false } } }.buttonStyle(.primary)
+                .disabled(model.stored == nil || model.isLoading || model.conflict)
+                .accessibilityIdentifier("saveProfile")
+        }
     }
 }
