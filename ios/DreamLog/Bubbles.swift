@@ -41,7 +41,7 @@ private struct BubbleView: View {
         let drift = Self.drifts[phase % Self.drifts.count]
         Button(action: select) {
             Text(bubble.label).font(.system(size: 18, design: .serif)).foregroundStyle(Color.ink)
-                .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.6).padding(10)
+                .multilineTextAlignment(.center).lineLimit(3).minimumScaleFactor(0.5).padding(10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background {
                     // Fill, highlight and rim are one shape, so they move and redraw together; Liquid Glass drew its disc in a
