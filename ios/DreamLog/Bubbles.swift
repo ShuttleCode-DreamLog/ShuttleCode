@@ -4,7 +4,6 @@ struct Bubble: Identifiable {
     let id: String
     let label: String
     let weight: Double
-    var dashed = false
 }
 
 // Translucent tinted bubbles packed into one cluster, each drifting a little like a real bubble: the Garden of patterns on
@@ -49,7 +48,7 @@ private struct BubbleView: View {
                     // shared layer that did not follow the drift, leaving the rim beside the bubble.
                     Circle().fill(tint.opacity(chosen ? 0.85 : 0.55))
                         .overlay(Circle().fill(.linearGradient(colors: [.white.opacity(0.55), .clear], startPoint: .topLeading, endPoint: .center)))
-                        .overlay(Circle().strokeBorder(chosen ? Color.sage : Color.bubble, style: StrokeStyle(lineWidth: chosen ? 2 : 1, dash: bubble.dashed ? [4, 3] : [])))
+                        .overlay(Circle().strokeBorder(chosen ? Color.sage : Color.bubble, lineWidth: chosen ? 1.5 : 0.75))
                 }
         }
         .buttonStyle(.plain)

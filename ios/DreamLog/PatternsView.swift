@@ -117,7 +117,7 @@ struct PatternsView: View {
     // Garden: the same findings as plants sized by the number of distinct dreams that contain them (EGMUIUX S10).
     @ViewBuilder private func gardenBlock(_ response: PatternsResponse) -> some View {
         let current = response.findings.first { $0.groupId == selected } ?? response.findings.first
-        BubbleCluster(bubbles: response.findings.map { Bubble(id: $0.groupId, label: $0.name, weight: Double($0.supportingDreams), dashed: $0.kind != .recurring) },
+        BubbleCluster(bubbles: response.findings.map { Bubble(id: $0.groupId, label: $0.name, weight: Double($0.supportingDreams)) },
                       selected: current?.groupId) { selected = $0 }
             .padding(.vertical, 8)
         if let current {

@@ -15,7 +15,7 @@ struct HomeView: View {
                     PageHeading("Your dreams, connected.", lede: "Notice what stays with you.")
                     if let latest = model.rows.first(where: { $0.item != nil }) { latestCard(latest) }
                     if let findings = patterns.response?.findings, !findings.isEmpty {
-                        BubbleCluster(bubbles: findings.map { Bubble(id: $0.groupId, label: $0.name, weight: Double($0.supportingDreams), dashed: $0.kind != .recurring) }) {
+                        BubbleCluster(bubbles: findings.map { Bubble(id: $0.groupId, label: $0.name, weight: Double($0.supportingDreams)) }) {
                             path.append(PatternRoute(groupId: $0))
                         }
                         .padding(.vertical, 8)
