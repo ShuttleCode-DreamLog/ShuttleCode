@@ -292,7 +292,7 @@ case let .failure(error):
 
 ## 5. 你现在可以调用哪些接口
 
-本地地址为 `https://127.0.0.1:8443`。每个业务请求都携带：
+本地地址为 `https://127.0.0.1:8443`，Debug 构建的 app 和测试只连这里；远端课程服务器 `https://34.66.84.214` 只给 Release 构建和即将上线功能的最后验证用（在 `xcodebuild` 命令上临时覆盖 `DREAMLOG_SERVER_URL`，不要提交）。日常开发和 AI 跑测试不要打远端，以免占用共享数据库和 Vertex 配额。每个业务请求都携带：
 
 ```http
 Authorization: Bearer <小写 UUID>

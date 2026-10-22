@@ -17,4 +17,4 @@ Journal and Notes support creation, reading, editing and deletion. Journal saves
 - [Verification record](docs/Verification.md)
 - [Coding instructions](CLAUDE.md)
 
-The app connects to the deployed course server `https://34.66.84.214` by default: trust that server's certificate `backend/deploy/dreamlog.crt` on the simulator, then run `ios/DreamLog.xcodeproj`. For a backend on your Mac, start `./scripts/run-local.sh`, trust its certificate and override `DREAMLOG_SERVER_URL`. See the local guide for exact commands.
+A Debug build (Xcode's Run and the test schemes) connects to the backend on your Mac: start `./scripts/run-local.sh`, trust its certificate on the simulator, then run `ios/DreamLog.xcodeproj`. Only Release builds use the deployed course server `https://34.66.84.214`; point a Debug build there only to check a feature that is about to ship (`DREAMLOG_SERVER_URL=https://34.66.84.214` on the build command, with `backend/deploy/dreamlog.crt` trusted), so everyday work does not load the shared server. See the local guide for exact commands.

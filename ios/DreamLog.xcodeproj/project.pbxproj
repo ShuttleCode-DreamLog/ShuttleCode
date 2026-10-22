@@ -269,7 +269,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DREAMLOG_SERVER_URL = "https://34.66.84.214";
+				DREAMLOG_SERVER_URL = "https://127.0.0.1:8443";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Configuration/Info.plist;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "DreamLog records your account so it can be turned into editable text.";
