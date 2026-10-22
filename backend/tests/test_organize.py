@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import re
+import shlex
+import sys
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -341,6 +343,27 @@ async def test_adapter_takes_the_service_account_token_from_metadata(endpoint, m
     with pytest.raises(providers.ProviderError) as raised:
         await call()
     assert (raised.value.category, raised.value.temporary) == ('provider_config', True) and 'provider_config token=unavailable' in caplog.text
+
+
+async def test_adapter_mints_local_tokens_with_the_configured_command(endpoint, monkeypatch, tmp_path):
+    monkeypatch.delenv('VERTEX_ACCESS_TOKEN')
+    monkeypatch.setattr(providers, 'credential', ('', 0.0))
+    mints = tmp_path / 'mints'
+    script = tmp_path / 'mint.py'
+    script.write_text(f"import pathlib\np = pathlib.Path({str(mints)!r})\np.write_text((p.read_text() if p.exists() else '') + 'x')\nprint('command-token')\n")
+    monkeypatch.setenv('VERTEX_TOKEN_COMMAND', f'{shlex.quote(sys.executable)} {shlex.quote(str(script))}')
+    async def answer(request):
+        return httpx.Response(200, json=completion(json.dumps({'summary': SUMMARY, 'items': [item('place', 'lake', 'Lake')]})))
+    endpoint.install(answer)
+    await call()
+    await call()
+    # One token serves until it is about to expire; a failing command is a configuration fault, not a missing key.
+    assert mints.read_text() == 'x' and [request.headers['authorization'] for request in endpoint.seen] == ['Bearer command-token'] * 2
+    monkeypatch.setattr(providers, 'credential', ('', 0.0))
+    monkeypatch.setenv('VERTEX_TOKEN_COMMAND', f'{shlex.quote(sys.executable)} -c "raise SystemExit(1)"')
+    with pytest.raises(providers.ProviderError) as failure:
+        await call()
+    assert failure.value.category == 'provider_config'
 
 
 @pytest.mark.parametrize(('status', 'body', 'category', 'temporary'), [

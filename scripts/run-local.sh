@@ -18,9 +18,9 @@ export TLS_KEY="${TLS_KEY:-$PWD/.local/server.key}"
 export PORT="${PORT:-8443}"
 # Foundation never calls an AI provider; a placeholder keeps the startup contract.
 # A developer's own key stays in the macOS Keychain item dreamlog-gemini-api-key, never in the repository.
-# Vertex AI takes an hour-long token from the developer's gcloud sign-in (docs/LocalDevelopment.md); restart the launcher when it runs out.
+# Vertex AI tokens last an hour; the backend mints each one from the developer's gcloud sign-in as needed (docs/LocalDevelopment.md).
 export VERTEX_PROJECT="${VERTEX_PROJECT:-dreamlog-511515}"
-export VERTEX_ACCESS_TOKEN="${VERTEX_ACCESS_TOKEN:-$(gcloud auth print-access-token 2>/dev/null || echo foundation-local-no-ai)}"
+export VERTEX_TOKEN_COMMAND="${VERTEX_TOKEN_COMMAND:-gcloud auth print-access-token}"
 # The model is a deployment fact (wiki 4.3.1); this default passed the free-tier trial calls of 15 October 2026.
 export TEXT_MODEL="${TEXT_MODEL:-gemini-3.1-flash-lite}"
 export EMBEDDING_MODEL="${EMBEDDING_MODEL:-gemini-embedding-001}"

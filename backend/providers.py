@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import secrets
+import shlex
 import time
 
 import httpx
@@ -38,17 +39,26 @@ def failure(status, body, model):
     return ProviderError(category, category != "provider_rejected")
 
 
-# Vertex AI takes a short-lived OAuth token instead of a key. On the server the VM's own service account issues it through the
-# metadata server, so no secret is stored; local development passes one from `gcloud auth print-access-token` instead.
+# Vertex AI takes a short-lived OAuth token instead of a key; Google issues them for an hour and never longer. On the server
+# the VM's own service account issues each through the metadata server, so no secret is stored; local development names a
+# command (`gcloud auth print-access-token`) that mints the next one from the developer's sign-in. Either way the token is
+# replaced a minute before it expires. A fixed VERTEX_ACCESS_TOKEN is used as given, for tests.
 async def authorization():
     global credential
     if supplied := os.environ.get("VERTEX_ACCESS_TOKEN"):
         return {"Authorization": f"Bearer {supplied}"}
     if time.monotonic() >= credential[1]:
         try:
-            body = (await client.get(TOKEN_URL, headers={"Metadata-Flavor": "Google"}, timeout=5)).json()
-            credential = (body["access_token"], time.monotonic() + body["expires_in"] - 60)
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            if command := os.environ.get("VERTEX_TOKEN_COMMAND"):
+                process = await asyncio.create_subprocess_exec(*shlex.split(command), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                output, _ = await asyncio.wait_for(process.communicate(), 30)
+                if process.returncode or not output.strip():
+                    raise ValueError
+                credential = (output.decode().strip(), time.monotonic() + 3600 - 60)
+            else:
+                body = (await client.get(TOKEN_URL, headers={"Metadata-Flavor": "Google"}, timeout=5)).json()
+                credential = (body["access_token"], time.monotonic() + body["expires_in"] - 60)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, OSError, asyncio.TimeoutError):
             logger.error("provider_config token=unavailable")
             raise ProviderError("provider_config", True) from None
     return {"Authorization": f"Bearer {credential[0]}"}

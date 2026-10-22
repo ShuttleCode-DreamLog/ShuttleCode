@@ -14,14 +14,14 @@ Clone the code repository and run commands from its root. No wiki checkout or cl
 ./scripts/run-local.sh
 ```
 
-The script runs `uv sync --locked`, creates a local HTTPS certificate valid for 100 days if absent, and starts Granian on port 8443. Certificate/key/database files stay in ignored `backend/.local/`. Foundation sends no AI calls. AI calls go to Vertex AI in the Google Cloud project `dreamlog-511515` (`VERTEX_PROJECT`). Vertex AI takes a short-lived OAuth token instead of a key: the script asks `gcloud auth print-access-token` for one, so sign in once with an account that may use the project, and pick that account's configuration if it is not your active one:
+The script runs `uv sync --locked`, creates a local HTTPS certificate valid for 100 days if absent, and starts Granian on port 8443. Certificate/key/database files stay in ignored `backend/.local/`. Foundation sends no AI calls. AI calls go to Vertex AI in the Google Cloud project `dreamlog-511515` (`VERTEX_PROJECT`). Vertex AI takes a short-lived OAuth token instead of a key: the backend mints each one from your gcloud sign-in, so sign in once with an account that may use the project, and pick that account's configuration if it is not your active one:
 
 ```sh
 gcloud auth login
 CLOUDSDK_ACTIVE_CONFIG_NAME=dreamlog ./scripts/run-local.sh
 ```
 
-The token lasts an hour; after that AI calls fail as `provider_config` until the launcher is restarted. Without a gcloud sign-in the script passes a clearly labeled placeholder, and saving and reading still work. An exported `VERTEX_ACCESS_TOKEN` takes precedence. The deployed server needs no token or key: its VM's service account issues tokens itself. The provider checks in the wiki still apply before real dreams are sent.
+Each token lasts an hour, which Google does not extend; the backend runs `VERTEX_TOKEN_COMMAND` (the script sets `gcloud auth print-access-token`) for the next one a minute before the current one expires, so the launcher need not be restarted. Without a gcloud sign-in that command fails, AI calls fail as `provider_config`, and saving and reading still work. An exported `VERTEX_ACCESS_TOKEN` is used as given and never refreshed; the tests use that. The deployed server needs no token or key: its VM's service account issues tokens itself. The provider checks in the wiki still apply before real dreams are sent.
 
 The backend also requires `TEXT_MODEL`; the script defaults it to `gemini-3.1-flash-lite`, and an exported value takes precedence. `EMBEDDING_MODEL` defaults to `gemini-embedding-001` the same way. `uv sync` installs the sqlite-vector extension, which the backend loads at start; if it cannot, the server still starts and pattern discovery reports `available` false. Every new text revision of a dream then schedules one `organize` call to Gemini for its summary and tags, followed by its analysis and its pattern tasks. Without a working token, or when the project may not use Vertex AI, the call fails as `provider_config`: the task waits, retries after 60 and 300 seconds, and starts again at the next server start, without affecting saving or reading.
 
@@ -49,7 +49,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun simctl keychain b
 
 Run the app again. The committed server URL is the deployed course server `https://34.66.84.214`. To use the backend on this Mac instead, set the DreamLog target's `DREAMLOG_SERVER_URL` build setting to `https://127.0.0.1:8443` locally without committing it, or pass `DREAMLOG_SERVER_URL=https://127.0.0.1:8443` to `xcodebuild`. For the deployed server, trust its committed certificate instead of the local one: `xcrun simctl keychain booted add-root-cert backend/deploy/dreamlog.crt`. The short development notice appears before the tabs. The Add dream tab or Type a dream on the Journal opens an editor; Done saves automatically, Revert abandons edits. Notes retains Save and supports Add photos; photo-only notes are allowed. Tap a saved row to read, edit or delete it. Unsent Journal text remains as a local draft; unsent Notes/photos stay only in the open editor. Settings lets you edit name, age and other profile fields, add/remove fields and Save profile. It also exposes history, the shared privacy text and Delete my journal. See [Architecture.md](Architecture.md) and [API.md](API.md).
 
-To see the Garden with more than a bubble or two, seed the simulator's local journal with invented dreams: `python3 scripts/seed-local.py` (it picks the user with the most dreams in `backend/.local/data/dreamlog.db`, or pass `--user`), then wait for the tags it prints. The launcher's Vertex AI token lasts an hour; after that every AI task answers `provider_config` and waits, and restarting the launcher resumes them.
+To see the Garden with more than a bubble or two, seed the simulator's local journal with invented dreams: `python3 scripts/seed-local.py` (it picks the user with the most dreams in `backend/.local/data/dreamlog.db`, or pass `--user`), then wait for the tags it prints. A task that failed with `provider_config` while the gcloud sign-in was missing waits and resumes when the launcher restarts.
 
 Run tests with Product → Test or:
 
@@ -73,7 +73,7 @@ The Xcode build setting `DREAMLOG_SERVER_URL` is the single app endpoint configu
 
 For a physical phone the localhost address refers to the phone. Use the Mac's LAN IP and generate a certificate whose subjectAltName contains that IP, point the app at `https://<Mac-LAN-IP>:8443`, and ensure the Mac firewall permits the connection. Install and explicitly trust that local certificate on the phone. The certificate is a local certificate authority: trust only a certificate generated by the developer, keep its private key private, and remove the trust when testing ends. Renew the certificate after 100 days and reinstall it on test devices.
 
-The same backend reads `DATA_DIR`, `TLS_CERT`, `TLS_KEY`, `PORT`, `VERTEX_PROJECT`, `TEXT_MODEL` and `EMBEDDING_MODEL` from the environment, and locally `VERTEX_ACCESS_TOKEN`. `scripts/run-local.sh` sets local defaults; production systemd supplies its environment file. The script does not change API behavior or ownership rules.
+The same backend reads `DATA_DIR`, `TLS_CERT`, `TLS_KEY`, `PORT`, `VERTEX_PROJECT`, `TEXT_MODEL` and `EMBEDDING_MODEL` from the environment, and locally `VERTEX_TOKEN_COMMAND` or a fixed `VERTEX_ACCESS_TOKEN`. `scripts/run-local.sh` sets local defaults; production systemd supplies its environment file. The script does not change API behavior or ownership rules.
 
 ## Common failures
 
