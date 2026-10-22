@@ -86,6 +86,9 @@ final class ScreensTests: XCTestCase {
         app.buttons["tab_patterns"].tap()
         sleep(4)
         refresh(app)
+        snapshot(app, "S10 Garden")
+        app.buttons["List"].tap()
+        sleep(1)
         snapshot(app, "S06 Patterns")
         let card = app.buttons["patternCard"].firstMatch
         if card.exists {
@@ -99,9 +102,6 @@ final class ScreensTests: XCTestCase {
             snapshot(app, "S06 Correct this pattern")
             app.buttons["Back"].firstMatch.tap()
         }
-        app.buttons["Garden"].tap()
-        sleep(1)
-        snapshot(app, "S10 Garden")
 
         app.buttons["tab_settings"].tap()
         XCTAssertTrue(app.staticTexts["Make space your way."].waitForExistence(timeout: 5))

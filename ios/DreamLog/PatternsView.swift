@@ -67,7 +67,7 @@ struct PatternsView: View {
     @Environment(AppModel.self) private var app
     @State private var model = PatternsModel()
     @State private var path = NavigationPath()
-    @State private var garden = false
+    @State private var garden = true
     @State private var selected: String?
     @State private var query = ""
     var body: some View {
@@ -75,8 +75,8 @@ struct PatternsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 13) {
                     Picker("View", selection: $garden) {
-                        Text("List").tag(false)
                         Text("Garden").tag(true)
+                        Text("List").tag(false)
                     }.pickerStyle(.segmented)
                     if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
                     if let response = model.response {
