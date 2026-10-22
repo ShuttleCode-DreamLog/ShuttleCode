@@ -127,7 +127,7 @@ The worker claims at most three attempts per task, waiting 15 s and 60 s between
 
 ## Summary and tags
 
-When `organize` completes, `dream.organization` holds the result for the revision it was made from:
+When `organize` completes, `dream.organization` holds the result for the revision it was made from, and a dream the user left untitled takes the generated title (at most 48 characters) as its `title`, as metadata without a new revision; a title the user typed is never replaced, and the user can rename the dream afterwards as before:
 
 ```json
 {"status": "current", "dream_revision": 2, "summary": "A night walk by a blue lake.", "summary_corrected": false,

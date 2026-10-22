@@ -216,9 +216,3 @@ nonisolated struct JournalRow: Identifiable {
     var date: String { draft?.dreamDate ?? item?.dreamDate ?? "" }
     var tags: [ItemTag] { item?.tags ?? [] }
 }
-
-// The prototype names a dream by its first sentence until the user renames it.
-nonisolated func autoTitle(_ text: String) -> String? {
-    let sentence = text.split(omittingEmptySubsequences: true) { ".!?\n".contains($0) }.first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
-    return sentence.isEmpty ? nil : String(sentence.prefix(48))
-}

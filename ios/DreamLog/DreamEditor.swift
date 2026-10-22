@@ -1,7 +1,7 @@
 import SwiftUI
 
-// The prototype's capture screen: the title lives in the header and follows the first sentence until renamed; the text,
-// then date and mood below. Voice capture is left out until the backend has it.
+// The prototype's capture screen: the text, then date and mood; ✓ saves and closes. The title lives in the header: the AI names
+// the dream with its summary and tags unless the user names it first. Voice capture is left out until the backend has it.
 struct DreamEditorView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -59,14 +59,11 @@ struct DreamEditorView: View {
         .onChange(of: scenePhase) { _, phase in if phase != .active { Task { await model.close(app) } } }
     }
 
-    private var title: String {
-        if let title = model.draft?.title, !title.isEmpty { return title }
-        return autoTitle(model.draft?.text ?? "") ?? (newEntry ? "New dream" : "Dream")
-    }
+    private var title: String { model.draft?.title?.isEmpty == false ? model.draft!.title! : newEntry ? "New dream" : "Dream" }
     @ViewBuilder private var header: some View {
         if model.isEditing {
             Header(title, onTitle: { titleDraft = model.draft?.title ?? ""; renaming = true }) {
-                BackButton(label: "Done") { Task { if await model.close(app) { dismiss() } } }
+                BackButton { Task { if await model.close(app) { dismiss() } } }
             } trailing: {
                 if model.isSending { ProgressView() } else {
                     Button("Revert") { confirmingDiscard = true }.buttonStyle(.quiet).accessibilityIdentifier("revertJournal")
@@ -76,6 +73,11 @@ struct DreamEditorView: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel(draft.baseRevision == 0 && !draft.unconfirmed && model.dream == nil ? "Discard draft" : "Delete journal entry")
                     }
+                    Button { Task { if await model.close(app) { dismiss() } } } label: {
+                        Image(systemName: "checkmark").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 36, height: 36).background(Color.sage, in: Circle())
+                    }
+                    .buttonStyle(.plain).accessibilityLabel("Done")
                 }
             }
         } else {

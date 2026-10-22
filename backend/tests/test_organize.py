@@ -114,7 +114,7 @@ async def test_organize_saves_checked_summary_and_tags(client, clock, gemini, ca
     task = (await organize_tasks(dream_id))[0]
     assert (task['status'], task['attempts'], task['error_code']) == ('completed', 1, None)
     output = (await db.rwdb.execute_fetchall("SELECT * FROM outputs WHERE dream_id=?", (dream_id,)))[0]
-    assert (json.loads(output['content']), output['model'], output['instruction_version'], output['dream_revision'], output['status']) == ({'summary': SUMMARY}, 'test-text-model', 'organize-1', 1, 'current')
+    assert (json.loads(output['content']), output['model'], output['instruction_version'], output['dream_revision'], output['status']) == ({'summary': SUMMARY}, 'test-text-model', 'organize-2', 1, 'current')
     stored = [tuple(row) for row in await db.rwdb.execute_fetchall('SELECT category,text,excerpt,feeling FROM tags WHERE output_id=? ORDER BY rowid', (output['id'],))]
     assert stored == [('place', 'blue lake', 'the “Blue  Lake”', None), ('person', 'teacher', "teacher said: don't run!", None), ('emotion', 'calm', 'I felt calm', 'stated'), ('emotion', 'fear', 'afraid of (the) bell+', 'inferred')]
     assert await used(user) == 1
@@ -142,7 +142,7 @@ async def test_request_sends_only_the_wrapped_account(client, clock, gemini):
     assert instruction.startswith('Summarize the supplied dream without interpreting it.')
     assert 'at most 600 characters' in instruction and 'at most 60 characters' in instruction and 'language of the account' in instruction
     assert f'<<<ACCOUNT {marker.group(1)}' in instruction and f'ACCOUNT {marker.group(1)}>>>' in instruction
-    assert (call['name'], call['temperature'], call['schema']['required']) == ('organization', 0, ['summary', 'items'])
+    assert (call['name'], call['temperature'], call['schema']['required']) == ('organization', 0, ['title', 'summary', 'items'])
     assert call['schema']['properties']['items']['items']['required'] == ['category', 'text', 'excerpt', 'feeling']
 
 
@@ -443,3 +443,21 @@ async def test_title_mood_or_date_changes_schedule_nothing(client, clock):
     for change in ({'title': 'Renamed'}, {'mood': 'sad'}, {'dream_date': '2026-10-09'}):
         assert (await client.put(f'/v1/dreams/{dream_id}', headers=headers, json={**body, **change})).status_code == 200
     assert [t['status'] for t in await organize_tasks(dream_id)] == ['obsolete']
+
+
+async def test_organize_names_an_untitled_dream_and_keeps_a_user_title(client, clock, gemini):
+    headers, user, untitled = await journal(client, title=None)
+    _, _, named = await journal(client, headers=headers)
+    for _ in range(2):
+        gemini.answers.append({'title': '  A quiet lake at night, lanterns on the water and a long walk home ', 'summary': SUMMARY, 'items': [item('place', 'lake', 'lake')]})
+    assert await tasks.run_once() and await tasks.run_once()
+    assert gemini.calls[0]['schema']['required'] == ['title', 'summary', 'items']
+    generated = (await client.get(f'/v1/dreams/{untitled}', headers=headers)).json()['dream']
+    assert generated['title'].startswith('A quiet lake at night') and len(generated['title']) <= 48 and generated['revision'] == 1
+    assert (await client.get(f'/v1/dreams/{named}', headers=headers)).json()['dream']['title'] == 'Lake title'
+    assert json.loads((await db.rwdb.execute_fetchall("SELECT content FROM outputs WHERE dream_id=?", (untitled,)))[0][0])['title'] == generated['title']
+    # The user still owns the name: a rename after the generated one stays, and a later organize never touches it.
+    renamed = (await client.put(f'/v1/dreams/{untitled}', headers=headers, json={'base_revision': 1, 'text': TEXT + ' Then I woke.', 'dream_date': '2026-10-08', 'title': 'My own name', 'source': 'text'})).json()['dream']
+    gemini.answers.append({'title': 'Another name', 'summary': SUMMARY, 'items': []})
+    assert renamed['revision'] == 2 and await tasks.run_once()
+    assert (await client.get(f'/v1/dreams/{untitled}', headers=headers)).json()['dream']['title'] == 'My own name'

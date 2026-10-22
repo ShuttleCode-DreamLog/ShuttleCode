@@ -119,8 +119,7 @@ extension FoundationTests {
         await model.save(app)
         #expect(try await app.store.draft(id).get()?.unconfirmed == true)
         #expect(model.draft?.text == "An invented dream.")
-        // The stored entry carries the first-sentence title the save sent, so reading it back needs no second PUT.
-        enqueue([(200, try dreamResponse(journalDream(id: id, title: "An invented dream")))])
+        enqueue([(200, try dreamResponse(journalDream(id: id)))])
         await model.save(app)
         #expect(BackendProtocol.state.withLock { $0.requests.map(\.httpMethod) } == ["PUT", "GET"])
         #expect(try await app.store.draft(id).get() == nil)
