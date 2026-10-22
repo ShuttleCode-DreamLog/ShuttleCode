@@ -20,6 +20,7 @@ nonisolated struct ProfileField: Identifiable {
 let profileFields: [ProfileField] = [
     .init(key: "name", title: "Name"),
     .init(key: "age", title: "Age", numeric: true),
+    .init(key: "gender", title: "Gender"),
     .init(key: "city", title: "City"),
     .init(key: "occupation", title: "Occupation")
 ]
