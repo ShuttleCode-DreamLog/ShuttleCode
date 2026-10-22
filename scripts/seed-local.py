@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Seed the local backend with invented sample dreams so Home shows a bubble cluster and Patterns has findings.
 
-Usage: python3 scripts/seed-local.py [--user <uuid>] [--base https://127.0.0.1:8443]
+Usage: python3 scripts/seed-local.py [--user <uuid>] [--base https://127.0.0.1:8443] [--cafile backend/.local/server.crt]
 Without --user it seeds the journal of the user with the most dreams in backend/.local/data/dreamlog.db (the simulator's).
 """
 import argparse, json, sqlite3, ssl, sys, time, urllib.request, uuid
@@ -25,10 +25,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--user")
     parser.add_argument("--base", default="https://127.0.0.1:8443")
+    parser.add_argument("--cafile", default=str(ROOT / "backend/.local/server.crt"))
     args = parser.parse_args()
     user = args.user or sqlite3.connect(ROOT / "backend/.local/data/dreamlog.db").execute(
         "SELECT user_id FROM dreams GROUP BY user_id ORDER BY count(*) DESC LIMIT 1").fetchone()[0]
-    context = ssl.create_default_context(cafile=ROOT / "backend/.local/server.crt")
+    context = ssl.create_default_context(cafile=args.cafile)
 
     def call(method, path, body=None):
         request = urllib.request.Request(args.base + path, method=method, data=json.dumps(body).encode() if body else None,
