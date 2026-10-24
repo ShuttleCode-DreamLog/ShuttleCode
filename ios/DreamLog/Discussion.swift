@@ -134,13 +134,13 @@ struct DiscussionView: View {
                     if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
                     if model.conversation?.analysisWithheld == true { Hint("This dream's analysis is not given to the AI in this discussion.") }
                     if model.conversation?.messages.contains(where: { $0.state == .stale }) == true { Hint("Dimmed messages are no longer sent to the AI.") }
-                    Bubble(text: "What would you like to explore about this dream?", user: false)
+                    ChatBubble(text: "What would you like to explore about this dream?", user: false)
                     ForEach(model.conversation?.messages ?? []) { row($0) }
                     if let pending = model.pending, model.conversation?.messages.contains(where: { $0.id == pending.messageId }) != true {
-                        Bubble(text: pending.text, user: true)
+                        ChatBubble(text: pending.text, user: true)
                     }
                     if model.contextRestarted { Hint("This reply starts afresh: earlier messages were not sent.") }
-                    if !model.streamingText.isEmpty { Bubble(text: model.streamingText, user: false) }
+                    if !model.streamingText.isEmpty { ChatBubble(text: model.streamingText, user: false) }
                     pendingBlock
                     if model.replyRemoved { Hint("The reply to this message is no longer available.") }
                     Color.clear.frame(height: 1).id("end")
@@ -174,7 +174,7 @@ struct DiscussionView: View {
 
     @ViewBuilder private func row(_ message: Message) -> some View {
         VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-            Bubble(text: message.text, user: message.role == .user).opacity(message.state == .stale ? 0.55 : 1)
+            ChatBubble(text: message.text, user: message.role == .user).opacity(message.state == .stale ? 0.55 : 1)
             if message.role == .user { actions(message) }
             else if !message.context.isEmpty {
                 DisclosureGroup("Sources") {
@@ -245,7 +245,7 @@ struct DiscussionView: View {
 }
 
 // The prototype's chat bubbles: the AI's on the left in soft green, the user's indented on the right.
-struct Bubble: View {
+struct ChatBubble: View {
     let text: String
     let user: Bool
     var body: some View {
