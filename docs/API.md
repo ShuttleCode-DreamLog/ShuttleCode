@@ -166,6 +166,24 @@ Section kinds, in stored order: `what_happened` and `reflection_questions` (alwa
 
 `status` becomes `outdated` when the dream's text, mood or date changes or a source changes. Excluding a note (its "Allow future AI context" off) or an earlier dream (its `history` switch off) removes the sections that cite it; deleting it removes every section. The user then refreshes: `POST /v1/dreams/{id}/analysis/refresh` with `{"refresh_id": "<new UUID>"}` answers 202 with the scheduled `task`, or 200 with work already on its way or the task of a repeated `refresh_id`; 403 `not_permitted` when the dream's `analysis` switch is off, 409 when it has no text, 429 at the daily limit.
 
+## Discussion
+
+A dream has at most one discussion (wiki 4.6.6). Asking never changes the dream; only `messages`, their `sources`, the `conversations` row and the usage counter are written.
+
+`GET /v1/dreams/{id}/conversation` returns `{"conversation": {"dream_id", "goal", "messages": [...], "corrections": [...], "analysis_withheld"}}` and creates nothing. A message is
+
+```json
+{"id": "6a1c…", "seq": 2, "role": "assistant", "text": "The frozen lake may echo…", "state": "ok", "reply_to": "51d0…", "offer": "remember_in_profile",
+ "context": [{"label": "DREAM", "kind": "dream", "source_id": "9f1e…", "source_revision": 2, "source_date": "2026-10-15", "available": true, "cut_to": null}],
+ "created_at": 1760371200000}
+```
+
+`POST /v1/dreams/{id}/conversation/messages` with `{"message_id": "<app-made UUID>", "text": "…"}` answers with `text/event-stream` (sse-starlette): `start` (`user_message_id`, `context_restarted`), any number of `delta` (`text`), then exactly one of `done` (`user_message`, `message`) or `error` (`error`, `message`, `request_id`; codes `provider_error`, `provider_refused`, `rate_limited`, `cap_reached`, `ceiling_reached`, `context_changed`). Before the stream: 404, 403 `not_permitted` when the dream's `discussion` switch is off, 409 `invalid_state` for a dream without text or a message ID reused with other text, 409 `turn_in_progress` while a reply in the same discussion is being written, 429 at the daily limit, 400 for empty text, 413 over `max_message_chars`. Repeating the same `message_id` and text after an error requests the reply again; after a saved reply it returns that reply without a call. Each reply costs one `text` unit.
+
+The reply is built from the dream, its summary and tags (`DESC`), its current analysis (`ANALYSIS`, only while current and, with the history switch off, only when it used no note or earlier dream), the life notes and earlier dreams `select_context` picks for analysis, the latest 10 answered pairs in state `ok`, and any correction notes. The model starts its reply with `OFFER: add_to_dream | remember_in_profile | none`; that line is never sent or stored, and `offer` keeps the first two values only. The offer is a hint: the app puts **Remember in profile** (a new life note with the message text, saved by the ordinary `PUT /v1/memories/{id}`) and **Add to dream** (the dream editor with the message appended) on every message the user wrote.
+
+A message becomes `stale` (kept, shown, never sent again) when the dream's text, mood or date changes, a source of an `ok` reply changes or is excluded, the history switch is turned off in a discussion that used a note or earlier dream, or the user restarts. Deleting a source deletes every reply from the first one that used it. `POST /v1/dreams/{id}/conversation/restart` sets every message `stale` and returns the conversation; it makes no call and creates no row. The goal and correction routes of wiki 4.6.6 are not implemented; their stored values are returned and sent.
+
 ## Patterns
 
 Pattern discovery runs by itself: after organization, `index_dream` embeds the dream and its tags (inferred emotions excluded), `match_patterns` asks Gemini whether each new tag joins a candidate group, starts one with a similar ungrouped tag of another dream, or stays alone, and `refresh_findings` writes each group's label, description and explanation. Candidates come only from the same user, from identical tags and from tags within cosine distance 0.40 (sqlite-vector); distance never creates a membership, the model must name a specific shared element. Every number is counted by the backend.

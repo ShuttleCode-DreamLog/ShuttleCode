@@ -196,6 +196,7 @@ async def save_dream(request):
             if stored is not None and (mood != stored['mood'] or body.dream_date != stored['dream_date']):
                 # The analysis was given the mood and the date; other dreams' analyses were given this date (wiki 4.5.4).
                 await connection.execute("UPDATE outputs SET status='outdated' WHERE dream_id=? AND type='analysis'", (dream_id,))
+                await connection.execute("UPDATE messages SET state='stale' WHERE dream_id=?", (dream_id,))
                 if body.dream_date != stored['dream_date']:
                     await records.source_changed(connection, 'dream', dream_id)
             if stored is None or text_changed:

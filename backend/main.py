@@ -16,6 +16,7 @@ import httpx
 import analysis
 import config
 import db
+import discussion
 import patterns
 import providers
 import tasks
@@ -108,6 +109,9 @@ routes.extend([
     Route("/v1/dreams/{dream_id}/corrections", save_correction, methods=["PUT"]),
     Route("/v1/dreams/{dream_id}/analysis", analysis.get_analysis, methods=["GET"]),
     Route("/v1/dreams/{dream_id}/analysis/refresh", analysis.refresh_analysis, methods=["POST"]),
+    Route("/v1/dreams/{dream_id}/conversation", discussion.get_conversation, methods=["GET"]),
+    Route("/v1/dreams/{dream_id}/conversation/messages", discussion.send_message, methods=["POST"]),
+    Route("/v1/dreams/{dream_id}/conversation/restart", discussion.restart_conversation, methods=["POST"]),
     Route("/v1/patterns", patterns.get_patterns, methods=["GET"]),
     Route("/v1/patterns/groups/{group_id}/label", patterns.label_group, methods=["PUT"]),
     Route("/v1/patterns/groups/{group_id}/dismiss", patterns.dismiss_group, methods=["POST"]),

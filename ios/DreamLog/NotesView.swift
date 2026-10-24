@@ -70,8 +70,8 @@ struct NoteEditorView: View {
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var removingPhoto: String?
     let newEntry: Bool
-    init(id: String, newEntry: Bool = false) {
-        _model = State(initialValue: NoteEditorModel(id: id, newEntry: newEntry))
+    init(id: String, newEntry: Bool = false, text: String = "") {
+        _model = State(initialValue: NoteEditorModel(id: id, newEntry: newEntry, text: text))
         self.newEntry = newEntry
     }
     var body: some View {

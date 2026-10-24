@@ -16,8 +16,10 @@ final class DreamModel {
     private let newEntry: Bool
     private var epoch: Int?
     private var writing: Task<Result<Void, StoreError>, Never>?
+    // Text from a discussion message (Add to dream, wiki 4.6.6, rule 2); it joins the draft once that is known, so unsent text is kept.
+    private var appending: String?
 
-    init(id: String, newEntry: Bool = false, editing: Bool = false) { self.id = id; self.newEntry = newEntry; isEditing = newEntry || editing }
+    init(id: String, newEntry: Bool = false, editing: Bool = false, appending: String? = nil) { self.id = id; self.newEntry = newEntry; isEditing = newEntry || editing; self.appending = appending }
     private func current(_ app: AppModel) -> Bool { epoch == app.journalEpoch && !app.deleting && app.noticeSeen }
     private func persist(_ value: Draft, app: AppModel) async -> Bool {
         guard current(app) else { return false }
@@ -50,7 +52,14 @@ final class DreamModel {
         if let epoch, epoch != app.journalEpoch { return }
         epoch = app.journalEpoch
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            if let added = appending, draft != nil {
+                appending = nil
+                isEditing = true
+                change(app) { $0.text = $0.text.isEmpty ? added : $0.text + "\n\n" + added }
+            }
+        }
         guard await flush(), current(app) else { return }
         switch await app.store.draft(id) {
         case let .success(value): if let value { draft = value; isEditing = value.unsent }

@@ -16,6 +16,9 @@ final class APIClient {
     private let identity: String
     private let session: URLSession
     private let invalidation: AsyncStream<Void>
+    // A streamed reply may take as long as the server's provider call, past the 60-second limit of ordinary requests.
+    private let streaming: URLSession
+    private let streamingInvalidation: AsyncStream<Void>
     var noticeAcknowledged = false
 
     init(baseURL: URL, identity: String, configuration: URLSessionConfiguration = .ephemeral) {
@@ -27,40 +30,56 @@ final class APIClient {
         let channel = AsyncStream<Void>.makeStream()
         invalidation = channel.stream
         session = URLSession(configuration: configuration, delegate: SessionDelegate(invalidated: channel.continuation), delegateQueue: nil)
+        let long = (configuration.copy() as? URLSessionConfiguration) ?? .ephemeral
+        long.timeoutIntervalForResource = 180
+        let streamChannel = AsyncStream<Void>.makeStream()
+        streamingInvalidation = streamChannel.stream
+        streaming = URLSession(configuration: long, delegate: SessionDelegate(invalidated: streamChannel.continuation), delegateQueue: nil)
     }
     func cancelAndWait() async {
         noticeAcknowledged = false
         session.invalidateAndCancel()
+        streaming.invalidateAndCancel()
         for await _ in invalidation { break }
+        for await _ in streamingInvalidation { break }
     }
-    private func response(method: String, path: String = "v1/me", query: [URLQueryItem] = [], body: Data? = nil, contentType: String = "application/json", deleting: Bool = false, empty: Bool = false) async -> Result<Data, APIError> {
+    private func request(method: String, path: String, query: [URLQueryItem] = [], body: Data?, contentType: String = "application/json", deleting: Bool = false) -> Result<URLRequest, APIError> {
         guard noticeAcknowledged || deleting else { return .failure(.noticeRequired) }
         guard baseURL.scheme == "https" else { return .failure(.notSent) }
         var request = URLRequest(url: baseURL.appending(path: path).appending(queryItems: query))
         request.httpMethod = method
         request.setValue("Bearer \(identity)", forHTTPHeaderField: "Authorization")
         if let body { request.httpBody = body; request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        return .success(request)
+    }
+    private func serverError(status: Int, _ data: Data) -> APIError {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let error = try? decoder.decode(ServerError.self, from: data)
+        return .server(status: status, code: error?.error ?? "unreadable", message: error?.message ?? "The server returned an unreadable error.")
+    }
+    private func transportError(_ error: any Error) -> APIError {
+        switch (error as? URLError)?.code {
+        case .cancelled: .interrupted
+        case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .notConnectedToInternet,
+             .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
+             .serverCertificateNotYetValid, .secureConnectionFailed: .notSent
+        default: error is CancellationError ? .interrupted : .noAnswer
+        }
+    }
+    private func response(method: String, path: String = "v1/me", query: [URLQueryItem] = [], body: Data? = nil, contentType: String = "application/json", deleting: Bool = false, empty: Bool = false) async -> Result<Data, APIError> {
+        let request: URLRequest
+        switch self.request(method: method, path: path, query: query, body: body, contentType: contentType, deleting: deleting) {
+        case let .success(value): request = value
+        case let .failure(error): return .failure(error)
+        }
         do {
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else { return .failure(.noAnswer) }
-            guard (200..<300).contains(response.statusCode) else {
-                let decoder = JSONDecoder()
-                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                let error = try? decoder.decode(ServerError.self, from: data)
-                return .failure(.server(status: response.statusCode, code: error?.error ?? "unreadable", message: error?.message ?? "The server returned an unreadable error."))
-            }
+            guard (200..<300).contains(response.statusCode) else { return .failure(serverError(status: response.statusCode, data)) }
             if (deleting || empty) && response.statusCode != 204 { return .failure(.decoding) }
             return .success(data)
-        } catch let error as URLError {
-            let failure: APIError = switch error.code {
-            case .cancelled: .interrupted
-            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .notConnectedToInternet,
-                 .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
-                 .serverCertificateNotYetValid, .secureConnectionFailed: .notSent
-            default: .noAnswer
-            }
-            return .failure(failure)
-        } catch { return .failure(.noAnswer) }
+        } catch { return .failure(transportError(error)) }
     }
     private func decode<Value: Decodable>(_ result: Result<Data, APIError>) -> Result<Value, APIError> {
         result.flatMap { data in
@@ -160,6 +179,62 @@ final class APIClient {
     func refreshAnalysis(_ dreamID: String, refreshID: String) async -> Result<TaskInfo, APIError> {
         let result: Result<TaskResponse, APIError> = await send("POST", "v1/dreams/\(dreamID)/analysis/refresh", RefreshRequest(refreshId: refreshID))
         return result.map(\.task)
+    }
+    func loadConversation(_ dreamID: String) async -> Result<Conversation, APIError> {
+        let result: Result<ConversationResponse, APIError> = decode(await response(method: "GET", path: "v1/dreams/\(dreamID)/conversation"))
+        return result.map(\.conversation)
+    }
+    func restartConversation(_ dreamID: String) async -> Result<Conversation, APIError> {
+        let result: Result<ConversationResponse, APIError> = decode(await response(method: "POST", path: "v1/dreams/\(dreamID)/conversation/restart"))
+        return result.map(\.conversation)
+    }
+    // Reads the server-sent events of a discussion turn line by line (wiki 4.2.5); cancelling the consuming task ends the request.
+    func sendTurn(_ dreamID: String, messageID: String, text: String) -> AsyncStream<TurnEvent> {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let prepared = Result { try encoder.encode(TurnRequest(messageId: messageID, text: text)) }.mapError { _ in APIError.decoding }
+            .flatMap { request(method: "POST", path: "v1/dreams/\(dreamID)/conversation/messages", body: $0) }
+        let (events, continuation) = AsyncStream<TurnEvent>.makeStream()
+        let reading = Task { [streaming] in
+            defer { continuation.finish() }
+            guard case let .success(request) = prepared else {
+                if case let .failure(error) = prepared { continuation.yield(.failed(error)) }
+                return
+            }
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            do {
+                let (bytes, response) = try await streaming.bytes(for: request)
+                guard let response = response as? HTTPURLResponse else { continuation.yield(.failed(.noAnswer)); return }
+                guard (200..<300).contains(response.statusCode) else {
+                    var data = Data()
+                    for try await byte in bytes { data.append(byte) }
+                    continuation.yield(.failed(serverError(status: response.statusCode, data)))
+                    return
+                }
+                var name = ""
+                for try await line in bytes.lines {
+                    if line.hasPrefix("event:") { name = line.dropFirst(6).trimmingCharacters(in: .whitespaces); continue }
+                    guard line.hasPrefix("data:") else { continue }
+                    let data = Data(line.dropFirst(5).trimmingCharacters(in: .whitespaces).utf8)
+                    let event: TurnEvent? = switch name {
+                    case "start": (try? decoder.decode(TurnStart.self, from: data)).map { .start(contextRestarted: $0.contextRestarted) }
+                    case "delta": (try? decoder.decode(TurnDelta.self, from: data)).map { .delta($0.text) }
+                    case "done": .some((try? decoder.decode(TurnDone.self, from: data)).map { .done($0) } ?? .failed(.decoding))
+                    case "error": .failed(serverError(status: 200, data))
+                    default: nil
+                    }
+                    guard let event else { continue }
+                    continuation.yield(event)
+                    if case .done = event { return }
+                    if case .failed = event { return }
+                }
+                continuation.yield(.failed(.interrupted))
+            } catch { continuation.yield(.failed(transportError(error))) }
+        }
+        continuation.onTermination = { _ in reading.cancel() }
+        return events
     }
     func loadPatterns() async -> Result<PatternsResponse, APIError> { decode(await response(method: "GET", path: "v1/patterns")) }
     func loadTags() async -> Result<TagList, APIError> { decode(await response(method: "GET", path: "v1/tags")) }

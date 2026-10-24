@@ -16,6 +16,8 @@ This page is the agreement between the backend and the iOS app for the Skeletal 
 | Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Implemented: "Keep out of AI processing" and the six switches on Dream Detail; "Allow AI use" on notes |
 | Recurring patterns with counts and evidence | `GET /v1/patterns` | Implemented: Patterns tab, List and Garden views |
 | Rename, dismiss, split a pattern | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Implemented: "Correct this pattern" on each finding |
+| Ask a follow-up question for a dream | `GET /v1/dreams/{id}/conversation`, `POST …/conversation/messages` (streamed), `POST …/conversation/restart` ([API.md](API.md#discussion)) | Implemented: "Conversation analysis" on Dream Detail, Start afresh |
+| Save a fact from the discussion | The reply's `offer`, then the ordinary `PUT /v1/memories/{id}` | Implemented: "Remember in profile" (and "Add to dream") on every message the user wrote, with the offer hint |
 
 ## Working agreement
 
