@@ -105,12 +105,11 @@ async def effective_summary(connection, output_id, content):
     return rows[0]['text'] if rows else msgspec.json.decode(content)['summary']
 
 
-async def select_context(connection, dream, use_history, use='analysis'):
+async def select_context(connection, dream, use_history):
     sources = []
     organization = await connection.execute_fetchall("SELECT * FROM outputs WHERE dream_id=? AND type='organization' AND status='current'", (dream['id'],))
     tags = await current_tags(connection, [dream['id']])
-    # The description goes with the dream's own switch for this use: analysis, or discussion (wiki 4.3.6).
-    if organization and dream[f'allow_{use}']:
+    if organization and dream['allow_analysis']:
         feelings = {tag['tag_id']: f" ({tag['feeling']})" if tag['feeling'] else '' for tag in tags}
         lines = [f"Summary: {await effective_summary(connection, organization[0]['id'], organization[0]['content'])}"] + [f"- {tag['category']}: {tag['text']}{feelings[tag['tag_id']]}; excerpt: {tag['excerpt']}" for tag in tags]
         sources.append({'label': 'DESC', 'kind': 'output', 'source_id': organization[0]['id'], 'source_revision': organization[0]['revision'], 'source_date': None, 'cut_to': None, 'body': '\n'.join(lines)})
@@ -169,7 +168,7 @@ def possible_kinds(labels):
     return [kind for kind in KINDS if (kind != 'waking_life_connections' or any(numbered(label, 'M') for label in labels)) and (kind != 'related_dreams' or any(numbered(label, 'D') for label in labels))]
 
 
-def context_blocks(dream, sources):
+def build_content(dream, sources, notes, possible):
     sentences, blocks = [], []
     wrapped, sentence = providers.wrap_account(dream['text'])
     sentences.append(sentence)
@@ -181,11 +180,6 @@ def context_blocks(dream, sources):
             blocks.append(f"## {source['label']} ({source['source_date']})\n{wrapped}")
         else:
             blocks.append(f"## {source['label']}" + (f" ({source['source_date']})" if source['source_date'] else '') + f"\n{source['body']}")
-    return sentences, blocks
-
-
-def build_content(dream, sources, notes, possible):
-    sentences, blocks = context_blocks(dream, sources)
     labels = ['DREAM'] + [source['label'] for source in sources]
     if len(labels) == 1:
         blocks.append('Other context:\nNo other context was supplied.')
@@ -320,16 +314,9 @@ async def analysis_value(connection, dream):
         return None
     output = outputs[0]
     content = msgspec.json.decode(output['content'])
-    context, excluded = await context_entries(connection, dream, output['dream_revision'], content['dream_date'], await connection.execute_fetchall('SELECT * FROM sources WHERE output_id=? ORDER BY rowid', (output['id'],)))
-    return {'id': output['id'], 'status': output['status'], 'dream_revision': output['dream_revision'], 'sections': content['sections'], 'withheld': content['withheld'], 'context': context,
-            'removed_sources': content.get('removed_sources', 0) + excluded, 'dream_date': content['dream_date'], 'mood': content['mood'], 'model': output['model'],
-            'instruction_version': output['instruction_version'], 'created_at': output['created_at']}
-
-
-async def context_entries(connection, dream, dream_revision, dream_date, rows):
-    context = [{'label': 'DREAM', 'kind': 'dream', 'source_id': dream['id'], 'source_revision': dream_revision, 'source_date': dream_date, 'available': dream['revision'] == dream_revision, 'cut_to': None}]
+    context = [{'label': 'DREAM', 'kind': 'dream', 'source_id': dream['id'], 'source_revision': output['dream_revision'], 'source_date': content['dream_date'], 'available': dream['revision'] == output['dream_revision'], 'cut_to': None}]
     excluded = 0
-    for row in rows:
+    for row in await connection.execute_fetchall('SELECT * FROM sources WHERE output_id=? ORDER BY rowid', (output['id'],)):
         table = {'memory': 'memories', 'dream': 'dreams', 'output': 'outputs', 'notes': 'dreams'}[row['kind']]
         found = await connection.execute_fetchall(f'SELECT * FROM {table} WHERE id=?', (row['source_id'],))
         target = found[0] if found else None
@@ -339,7 +326,9 @@ async def context_entries(connection, dream, dream_revision, dream_date, rows):
             continue
         available = target is not None and (row['kind'] == 'notes' or target['revision'] == row['source_revision'])
         context.append({key: row[key] for key in ('label', 'kind', 'source_id', 'source_revision', 'source_date', 'cut_to')} | {'available': available})
-    return context, excluded
+    return {'id': output['id'], 'status': output['status'], 'dream_revision': output['dream_revision'], 'sections': content['sections'], 'withheld': content['withheld'], 'context': context,
+            'removed_sources': content.get('removed_sources', 0) + excluded, 'dream_date': content['dream_date'], 'mood': content['mood'], 'model': output['model'],
+            'instruction_version': output['instruction_version'], 'created_at': output['created_at']}
 
 
 async def owned(connection, identity, dream_id):

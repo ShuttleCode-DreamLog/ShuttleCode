@@ -43,43 +43,34 @@ final class APIClient {
         for await _ in invalidation { break }
         for await _ in streamingInvalidation { break }
     }
-    private func request(method: String, path: String, query: [URLQueryItem] = [], body: Data?, contentType: String = "application/json", deleting: Bool = false) -> Result<URLRequest, APIError> {
+    private func response(method: String, path: String = "v1/me", query: [URLQueryItem] = [], body: Data? = nil, contentType: String = "application/json", deleting: Bool = false, empty: Bool = false) async -> Result<Data, APIError> {
         guard noticeAcknowledged || deleting else { return .failure(.noticeRequired) }
         guard baseURL.scheme == "https" else { return .failure(.notSent) }
         var request = URLRequest(url: baseURL.appending(path: path).appending(queryItems: query))
         request.httpMethod = method
         request.setValue("Bearer \(identity)", forHTTPHeaderField: "Authorization")
         if let body { request.httpBody = body; request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
-        return .success(request)
-    }
-    private func serverError(status: Int, _ data: Data) -> APIError {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let error = try? decoder.decode(ServerError.self, from: data)
-        return .server(status: status, code: error?.error ?? "unreadable", message: error?.message ?? "The server returned an unreadable error.")
-    }
-    private func transportError(_ error: any Error) -> APIError {
-        switch (error as? URLError)?.code {
-        case .cancelled: .interrupted
-        case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .notConnectedToInternet,
-             .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
-             .serverCertificateNotYetValid, .secureConnectionFailed: .notSent
-        default: error is CancellationError ? .interrupted : .noAnswer
-        }
-    }
-    private func response(method: String, path: String = "v1/me", query: [URLQueryItem] = [], body: Data? = nil, contentType: String = "application/json", deleting: Bool = false, empty: Bool = false) async -> Result<Data, APIError> {
-        let request: URLRequest
-        switch self.request(method: method, path: path, query: query, body: body, contentType: contentType, deleting: deleting) {
-        case let .success(value): request = value
-        case let .failure(error): return .failure(error)
-        }
         do {
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else { return .failure(.noAnswer) }
-            guard (200..<300).contains(response.statusCode) else { return .failure(serverError(status: response.statusCode, data)) }
+            guard (200..<300).contains(response.statusCode) else {
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                let error = try? decoder.decode(ServerError.self, from: data)
+                return .failure(.server(status: response.statusCode, code: error?.error ?? "unreadable", message: error?.message ?? "The server returned an unreadable error."))
+            }
             if (deleting || empty) && response.statusCode != 204 { return .failure(.decoding) }
             return .success(data)
-        } catch { return .failure(transportError(error)) }
+        } catch let error as URLError {
+            let failure: APIError = switch error.code {
+            case .cancelled: .interrupted
+            case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .notConnectedToInternet,
+                 .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
+                 .serverCertificateNotYetValid, .secureConnectionFailed: .notSent
+            default: .noAnswer
+            }
+            return .failure(failure)
+        } catch { return .failure(.noAnswer) }
     }
     private func decode<Value: Decodable>(_ result: Result<Data, APIError>) -> Result<Value, APIError> {
         result.flatMap { data in
@@ -189,28 +180,35 @@ final class APIClient {
         return result.map(\.conversation)
     }
     // Reads the server-sent events of a discussion turn line by line (wiki 4.2.5); cancelling the consuming task ends the request.
+    // It keeps response()'s notice gate and Bearer identity, on its own session with the longer limit.
     func sendTurn(_ dreamID: String, messageID: String, text: String) -> AsyncStream<TurnEvent> {
+        let (events, continuation) = AsyncStream<TurnEvent>.makeStream()
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
-        let prepared = Result { try encoder.encode(TurnRequest(messageId: messageID, text: text)) }.mapError { _ in APIError.decoding }
-            .flatMap { request(method: "POST", path: "v1/dreams/\(dreamID)/conversation/messages", body: $0) }
-        let (events, continuation) = AsyncStream<TurnEvent>.makeStream()
+        let body = try? encoder.encode(TurnRequest(messageId: messageID, text: text))
+        let refusal: APIError? = !noticeAcknowledged ? .noticeRequired : baseURL.scheme != "https" ? .notSent : body == nil ? .decoding : nil
+        var request = URLRequest(url: baseURL.appending(path: "v1/dreams/\(dreamID)/conversation/messages"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(identity)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        let failure = { (status: Int, data: Data) -> TurnEvent in
+            let error = try? decoder.decode(ServerError.self, from: data)
+            return .failed(.server(status: status, code: error?.error ?? "unreadable", message: error?.message ?? "The server returned an unreadable error."))
+        }
         let reading = Task { [streaming] in
             defer { continuation.finish() }
-            guard case let .success(request) = prepared else {
-                if case let .failure(error) = prepared { continuation.yield(.failed(error)) }
-                return
-            }
-            let decoder = JSONDecoder()
-            decoder.keyDecodingStrategy = .convertFromSnakeCase
-            decoder.dateDecodingStrategy = .millisecondsSince1970
+            if let refusal { continuation.yield(.failed(refusal)); return }
             do {
                 let (bytes, response) = try await streaming.bytes(for: request)
                 guard let response = response as? HTTPURLResponse else { continuation.yield(.failed(.noAnswer)); return }
                 guard (200..<300).contains(response.statusCode) else {
                     var data = Data()
                     for try await byte in bytes { data.append(byte) }
-                    continuation.yield(.failed(serverError(status: response.statusCode, data)))
+                    continuation.yield(failure(response.statusCode, data))
                     return
                 }
                 var name = ""
@@ -222,7 +220,7 @@ final class APIClient {
                     case "start": (try? decoder.decode(TurnStart.self, from: data)).map { .start(contextRestarted: $0.contextRestarted) }
                     case "delta": (try? decoder.decode(TurnDelta.self, from: data)).map { .delta($0.text) }
                     case "done": .some((try? decoder.decode(TurnDone.self, from: data)).map { .done($0) } ?? .failed(.decoding))
-                    case "error": .failed(serverError(status: 200, data))
+                    case "error": failure(200, data)
                     default: nil
                     }
                     guard let event else { continue }
@@ -231,7 +229,17 @@ final class APIClient {
                     if case .failed = event { return }
                 }
                 continuation.yield(.failed(.interrupted))
-            } catch { continuation.yield(.failed(transportError(error))) }
+            } catch {
+                let code = (error as? URLError)?.code
+                let failed: APIError = switch code {
+                case .cancelled: .interrupted
+                case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .notConnectedToInternet,
+                     .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
+                     .serverCertificateNotYetValid, .secureConnectionFailed: .notSent
+                default: error is CancellationError ? .interrupted : .noAnswer
+                }
+                continuation.yield(.failed(failed))
+            }
         }
         continuation.onTermination = { _ in reading.cancel() }
         return events

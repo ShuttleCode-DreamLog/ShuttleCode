@@ -5,7 +5,7 @@ The app opens on Home and has a bottom bar with Journal, Pattern, Add dream (whi
 ```mermaid
 flowchart LR
     V[SwiftUI screens] --> M[Observable app and editor models]
-    M --> C[APIClient: one URLSession and Bearer identity]
+    M --> C[APIClient: request and streaming URLSessions, Bearer identity]
     C --> R[Starlette routes on Granian HTTPS]
     R --> S[Direct SQL in SQLite]
     M --> L[LocalStore: journal drafts]
