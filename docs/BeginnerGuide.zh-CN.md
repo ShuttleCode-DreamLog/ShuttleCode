@@ -457,7 +457,21 @@ Notes 无日期时使用 null + unknown；有日期时精度为 exact 或 approx
 
 以下命令从代码仓库 `ShuttleCode` 根目录开始；完整要求见 [LocalDevelopment.md](LocalDevelopment.md)。Python 环境由 uv 管理，当前项目要求 Python 3.14；iOS 部署目标为 26，Swift 语言模式为 6。语言模式不是编译器版本。
 
-启动后端并保持终端运行：
+AI 调用走 Google Cloud 项目 `dreamlog-511515` 的 Vertex AI。后端用你本机的 gcloud 登录换短期 token，所以先用刚被加上权限的那个 Google 账号登录，并单独建一个名为 `dreamlog` 的配置，避免和 Mac 上其他 gcloud 账号混在一起：
+
+```sh
+gcloud auth login
+gcloud config configurations create dreamlog
+gcloud config set account 组员的Google邮箱
+gcloud config set project dreamlog-511515
+CLOUDSDK_ACTIVE_CONFIG_NAME=dreamlog ./scripts/run-local.sh
+```
+
+`gcloud auth login` 要用刚被授予 `dreamlog-511515` 权限的账号。`configurations create` 会把 `dreamlog` 设为当前配置，后面两行 `config set` 就写进这个配置。把 `组员的Google邮箱` 换成该账号的地址。如果 `dreamlog` 配置已经存在，跳过 `configurations create`，先运行 `gcloud config configurations activate dreamlog`，再执行那两行 `config set`。之后每次启动只需要最后一行。
+
+没有这份登录时，保存和阅读仍然可用，AI 调用会以 `provider_config` 失败并在下次启动时重试。完整说明见 [LocalDevelopment.md](LocalDevelopment.md)。
+
+启动后端并保持终端运行（上面最后一行已经包含启动；只跑后端、暂时不用 Vertex 时也可以直接）：
 
 ```sh
 ./scripts/run-local.sh
