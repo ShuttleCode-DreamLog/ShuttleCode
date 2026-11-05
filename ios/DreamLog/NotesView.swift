@@ -8,14 +8,16 @@ struct NotesView: View {
     @State private var model = NotesModel()
     @State private var path: [String] = []
     @State private var creating: EntryRoute?
+    @State private var query = ""
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 13) {
                     Eyebrow("Your waking world")
                     PageHeading("Small moments matter.")
+                    TextField("Search notes…", text: $query).field().submitLabel(.search).onSubmit(search).accessibilityIdentifier("noteSearch")
                     if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
-                    if model.items.isEmpty && !model.isLoading { EmptyCard("No notes yet") }
+                    if model.items.isEmpty && !model.isLoading { EmptyCard(model.query.isEmpty ? "No notes yet" : "No matching notes") }
                     ForEach(model.items) { note in NavigationLink(value: note.id) { NoteCard(note: note) }.buttonStyle(.plain) }
                     if model.hasMore {
                         Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading)
@@ -37,7 +39,15 @@ struct NotesView: View {
             .reloadable { await model.load(app) }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await model.load(app) } } }
             .onChange(of: app.refreshes) { Task { await model.load(app) } }
+            .onChange(of: query) { _, value in
+                if value.isEmpty && !model.query.isEmpty { model.query = ""; Task { await model.load(app) } }
+            }
         }
+    }
+    private func search() {
+        guard !model.isLoading else { return }
+        model.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { await model.load(app) }
     }
 }
 
@@ -65,7 +75,6 @@ struct NoteEditorView: View {
     @State private var confirmingDelete = false
     @State private var confirmingClose = false
     @State private var showingSaveError = false
-    @State private var showMore = false
     @FocusState private var writingText: Bool
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var removingPhoto: String?
@@ -83,6 +92,7 @@ struct NoteEditorView: View {
                 }
                 if model.isEditing { editingBlock } else if let stored = model.stored { readingBlock(stored) }
                 photosBlock
+                aiUseBlock
                 if model.isEditing {
                     HStack(spacing: 10) {
                         Button("Cancel") { cancel() }.buttonStyle(.secondary)
@@ -151,18 +161,15 @@ struct NoteEditorView: View {
             }
             .field()
         Hint("\(model.value.text.unicodeScalars.count) / \(app.limits.maxMemoryChars) characters")
-        DisclosureGroup("More", isExpanded: $showMore) {
-            VStack(alignment: .leading, spacing: 4) {
-                if model.value.eventDate != nil {
-                    Picker("Date precision", selection: $editor.value.eventPrecision) {
-                        Text("Exact").tag(EventPrecision.exact)
-                        Text("Approximate").tag(EventPrecision.approximate)
-                    }.pickerStyle(.segmented).padding(.vertical, 8)
-                }
-                Toggle("Still going on", isOn: $editor.value.isOngoing).switchRow()
-                Toggle("Allow AI use", isOn: $editor.value.allowAnalysis).switchRow()
-            }.padding(.top, 8)
-        }.font(.callout).padding(.top, 8)
+        VStack(alignment: .leading, spacing: 4) {
+            if model.value.eventDate != nil {
+                Picker("Date precision", selection: $editor.value.eventPrecision) {
+                    Text("Exact").tag(EventPrecision.exact)
+                    Text("Approximate").tag(EventPrecision.approximate)
+                }.pickerStyle(.segmented).padding(.vertical, 8)
+            }
+            Toggle("Still going on", isOn: $editor.value.isOngoing).switchRow()
+        }.font(.callout)
         if model.conflict {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Stored note changed").font(.heading)
@@ -184,17 +191,25 @@ struct NoteEditorView: View {
             Button("Edit") { model.isEditing = true }.buttonStyle(.secondary)
         }
         Text(stored.text).font(.callout).textSelection(.enabled)
-        DisclosureGroup("More", isExpanded: $showMore) {
-            VStack(alignment: .leading, spacing: 0) {
-                LabeledRow("Recorded") { Text(stored.recordedAt.formatted(date: .abbreviated, time: .shortened)).font(.callout) }
-                if let date = stored.eventDate {
-                    LabeledRow("Event date") { Text(displayDate(date)).font(.callout) }
-                    LabeledRow("Precision") { Text(stored.eventPrecision.rawValue.capitalized).font(.callout) }
-                }
-                LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
-                LabeledRow("Allow AI use") { Text(stored.allowAnalysis ? "On" : "Off").font(.callout) }
-            }.padding(.top, 8)
-        }.font(.callout).padding(.top, 8)
+        VStack(alignment: .leading, spacing: 0) {
+            LabeledRow("Recorded") { Text(stored.recordedAt.formatted(date: .abbreviated, time: .shortened)).font(.callout) }
+            if let date = stored.eventDate {
+                LabeledRow("Event date") { Text(displayDate(date)).font(.callout) }
+                LabeledRow("Precision") { Text(stored.eventPrecision.rawValue.capitalized).font(.callout) }
+            }
+            LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
+        }.padding(.top, 8)
+    }
+    // AI use is the note page's last section (Re-Design list, AI use); reading switches it at once, editing saves it with the note.
+    @ViewBuilder private var aiUseBlock: some View {
+        @Bindable var editor = model
+        if model.isEditing || model.stored != nil { Heading("AI use") }
+        if model.isEditing {
+            Toggle("Allow AI use", isOn: $editor.value.allowAnalysis).font(.callout).switchRow().accessibilityIdentifier("noteAllowAI")
+        } else if let stored = model.stored {
+            Toggle("Allow AI use", isOn: Binding(get: { stored.allowAnalysis }, set: { on in Task { await model.setAllowAnalysis(app, on) } }))
+                .font(.callout).switchRow().accessibilityIdentifier("noteAllowAI")
+        }
     }
     @ViewBuilder private var photosBlock: some View {
         let saved = model.stored?.photos ?? []

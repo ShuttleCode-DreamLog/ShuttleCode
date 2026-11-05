@@ -46,6 +46,41 @@ extension FoundationTests {
         #expect(paths == ["/v1/memories/\(id)", "/v1/memories/\(id)/photos/\(photoID)", "/v1/memories/\(id)", "/v1/memories/\(id)/photos/\(photoID)"])
         await closeJournalApp(app)
     }
+    @Test func noteSearchKeepsItsQueryThroughLoadMore() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let memory = try #require(JSONSerialization.jsonObject(with: memoryResponse(id: newID())) as? [String: Any])["memory"]!
+        let page = { (more: Bool) in try JSONSerialization.data(withJSONObject: ["items": [memory], "has_more": more]) }
+        let model = NotesModel()
+        model.query = "exam week"
+        enqueue([(200, try page(true))])
+        await model.load(app)
+        enqueue([(200, try page(false))])
+        await model.load(app, more: true)
+        let queries = BackendProtocol.state.withLock { $0.requests.map { URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.queryItems ?? [] } }
+        #expect(queries.map { $0.first { $0.name == "q" }?.value } == ["exam week", "exam week"])
+        #expect(queries.last?.first { $0.name == "offset" }?.value == "1")
+        await closeJournalApp(app)
+    }
+    @Test func readingNoteSwitchesAIUseAndReloadsAfterAConflict() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let id = newID()
+        let model = NoteEditorModel(id: id)
+        enqueue([(200, try memoryResponse(id: id, text: "Stored text."))])
+        await model.load(app)
+        enqueue([(409, Data("{\"error\":\"revision_conflict\",\"message\":\"Reload\",\"current_revision\":2}".utf8)), (200, try memoryResponse(id: id, text: "Changed elsewhere.", revision: 2))])
+        await model.setAllowAnalysis(app, false)
+        let requests = BackendProtocol.state.withLock { $0.requests }
+        let body = try #require(sentBody(requests[1]))
+        #expect(requests[1].httpMethod == "PUT" && body["allow_analysis"] as? Bool == false && body["base_revision"] as? Int == 1 && body["text"] as? String == "Stored text.")
+        #expect(requests[2].httpMethod == "GET" && !model.conflict && !model.hasChanges && model.stored?.text == "Changed elsewhere.")
+        await closeJournalApp(app)
+    }
+    @Test func dreamSectionOrderFallsBackForUnknownMissingAndRepeatedNames() {
+        #expect(dreamSections("") == DreamSection.allCases)
+        #expect(dreamSections("analysis,bogus,analysis,tags") == [.analysis, .tags, .originalText, .summary])
+    }
     func memoryResponse(id: String, text: String = "Sample life note.", revision: Int = 1) throws -> Data {
         let memory = Memory(id: id, text: text, recordedAt: .now, eventPrecision: .unknown, isOngoing: false, allowAnalysis: true, revision: revision, updatedAt: .now)
         let encoder = JSONEncoder()

@@ -123,3 +123,26 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
         assert not await upgraded.execute_fetchall('PRAGMA foreign_key_check')
     finally:
         await upgraded.close()
+
+
+async def test_notes_search_matches_title_or_text_literally(client):
+    headers, other = credential(), credential()
+    for title, text in (('Exam week', 'Invented: library until late.'), (None, 'Invented: 50% sure_of it \\ done.'), ('Trip', 'Invented: train to the coast.')):
+        await client.put(f'/v1/memories/{uuid4()}', headers=headers, json=note(text, title=title))
+    await client.put(f'/v1/memories/{uuid4()}', headers=other, json=note('Invented: exam elsewhere.'))
+    found = lambda query: client.get('/v1/memories', headers=headers, params={'q': query})
+    assert [item['title'] for item in (await found('EXAM')).json()['items']] == ['Exam week']
+    assert [item['title'] for item in (await found('coast')).json()['items']] == ['Trip']
+    for literal in ('%', '_', '\\'):
+        assert len((await found(literal)).json()['items']) == 1
+    assert len((await found('   ')).json()['items']) == 3
+    assert (await client.get('/v1/memories', headers=headers, params={'q': 'Exam', 'ongoing': 'true'})).json()['items'] == []
+    assert (await found('x' * 5000)).status_code == 413
+
+
+async def test_notes_permission_only_save_ignores_stale_revision(client):
+    headers, path = credential(), f'/v1/memories/{uuid4()}'
+    await client.put(path, headers=headers, json=note())
+    await client.put(path, headers=headers, json=note('Invented: edited.', base_revision=1))
+    turned = await client.put(path, headers=headers, json=note('Invented: edited.', base_revision=1, allow_analysis=False))
+    assert turned.status_code == 200 and turned.json()['memory']['revision'] == 2 and not turned.json()['memory']['allow_analysis']

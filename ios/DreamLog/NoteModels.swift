@@ -64,12 +64,13 @@ final class NotesModel {
     var hasMore = false
     var isLoading = false
     var error: String?
+    var query = ""
     func load(_ app: AppModel, more: Bool = false) async {
         guard app.noticeSeen, !app.deleting, !isLoading, let client = app.client else { return }
         isLoading = true
         defer { isLoading = false }
         let epoch = app.journalEpoch
-        let result = await client.loadMemories(offset: more ? items.count : 0)
+        let result = await client.loadMemories(offset: more ? items.count : 0, query: query)
         guard epoch == app.journalEpoch, !app.deleting else { return }
         switch result {
         case let .success(page):
@@ -168,6 +169,19 @@ final class NoteEditorModel {
         case let .failure(failure):
             conflict = failure.code == "revision_conflict"; missing = failure.code == "not_found"; error = failure.message
             return false
+        }
+    }
+    // The reading page has no conflict card, so a failed switch reloads the stored note instead (the server keeps a permission change through a text conflict).
+    func setAllowAnalysis(_ app: AppModel, _ allowed: Bool) async {
+        guard !isSending, !isEditing, var change = stored.map(MemorySave.init), current(app), let client = app.client else { return }
+        change.allowAnalysis = allowed
+        isSending = true
+        let result = await client.saveMemory(id, value: change)
+        isSending = false
+        guard current(app) else { return }
+        switch result {
+        case let .success(memory): stored = memory; value = MemorySave(memory); error = nil
+        case .failure: await load(app)
         }
     }
     func useStored() {

@@ -43,8 +43,13 @@ async def list_memories(request):
     ongoing = request.query_params.get('ongoing')
     if ongoing not in (None, 'true', 'false'):
         raise RequestError(400, 'invalid_request', 'Ongoing must be true or false.')
-    clause = '' if ongoing is None else ' AND is_ongoing=?'
-    values = (identity,) if ongoing is None else (identity, int(ongoing == 'true'))
+    query = request.query_params.get('q', '')
+    if len(query) > config.LIMITS['max_message_chars']:
+        raise RequestError(413, 'too_large', 'Search text is too long.')
+    query = query.strip()
+    pattern = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+    clause = ('' if ongoing is None else ' AND is_ongoing=?') + (" AND (text LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')" if query else '')
+    values = (identity, *(() if ongoing is None else (int(ongoing == 'true'),)), *((pattern, pattern) if query else ()))
     rows = await db.rwdb.execute_fetchall(f'SELECT * FROM memories WHERE user_id=?{clause} ORDER BY recorded_at DESC,id ASC LIMIT ? OFFSET ?', (*values, limit + 1, offset))
     items = [memory_value(row) for row in rows[:limit]]
     photo_rows = await db.rwdb.execute_fetchall(f"SELECT id,memory_id,content_type,length(content) AS byte_count,created_at FROM memory_photos WHERE user_id=? AND memory_id IN ({','.join('?' for _ in items)}) ORDER BY created_at,id", (identity, *(item['id'] for item in items))) if items else []

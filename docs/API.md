@@ -17,7 +17,7 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | Analysis | `GET /v1/dreams/{id}/analysis` | `POST /v1/dreams/{id}/analysis/refresh` | Deleted with its dream |
 | Patterns | `GET /v1/patterns` | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Groups without members, corrections or a user label are removed by the next refresh |
 
-Lists return `{"items":[…],"has_more":false}`. Pass `limit` (1–200, default 50) and `offset` (default 0). Journal order is date descending, creation time descending, ID ascending; Notes order is recording time descending, ID ascending. Notes additionally accepts `ongoing=true` or `ongoing=false`.
+Lists return `{"items":[…],"has_more":false}`. Pass `limit` (1–200, default 50) and `offset` (default 0). Journal order is date descending, creation time descending, ID ascending; Notes order is recording time descending, ID ascending. Notes additionally accepts `ongoing=true` or `ongoing=false`, and `q`: a note is listed when its title or text contains the stripped `q` literally (`%`, `_` and `\` match themselves; letters match regardless of ASCII case); a blank `q` lists every note, and one longer than `max_message_chars` returns 413 `too_large`.
 
 ## Journal
 

@@ -201,6 +201,6 @@ final class AppModel {
         await start()
     }
     private func clearDefaults() {
-        for key in [noticeKey, noticeContentKey, reminderKey, answeredOffersKey] { defaults.removeObject(forKey: key) }
+        for key in [noticeKey, noticeContentKey, reminderKey, answeredOffersKey, dreamSectionOrderKey] { defaults.removeObject(forKey: key) }
     }
 }

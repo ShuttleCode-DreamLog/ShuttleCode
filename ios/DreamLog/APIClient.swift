@@ -98,8 +98,8 @@ final class APIClient {
         await response(method: "DELETE", path: "v1/dreams/\(id)", empty: true).map { _ in () }
     }
     func deleteMe() async -> Result<Void, APIError> { await response(method: "DELETE", deleting: true).map { _ in () } }
-    func loadMemories(offset: Int = 0) async -> Result<MemoryPage, APIError> {
-        decode(await response(method: "GET", path: "v1/memories", query: [URLQueryItem(name: "offset", value: String(offset))]))
+    func loadMemories(offset: Int = 0, query: String = "") async -> Result<MemoryPage, APIError> {
+        decode(await response(method: "GET", path: "v1/memories", query: [URLQueryItem(name: "offset", value: String(offset))] + (query.isEmpty ? [] : [URLQueryItem(name: "q", value: query)])))
     }
     func loadMemory(_ id: String) async -> Result<Memory, APIError> {
         let result: Result<MemoryResponse, APIError> = decode(await response(method: "GET", path: "v1/memories/\(id)"))
