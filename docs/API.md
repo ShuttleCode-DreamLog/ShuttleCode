@@ -10,7 +10,7 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | --- | --- | --- | --- |
 | Device settings | `GET /v1/me` | `PUT /v1/me` | `DELETE /v1/me` deletes all owned data |
 | Journal | `GET /v1/dreams`, `GET /v1/dreams/{id}` | `PUT /v1/dreams/{id}`, `PUT /v1/dreams/{id}/permissions` | `DELETE /v1/dreams/{id}` |
-| Life notes | `GET /v1/memories`, `GET /v1/memories/{id}` | `PUT /v1/memories/{id}` | `DELETE /v1/memories/{id}` |
+| Life notes | `GET /v1/memories`, `GET /v1/memories/{id}`, `POST /v1/memories/search` | `PUT /v1/memories/{id}` | `DELETE /v1/memories/{id}` |
 | Note photos | `GET /v1/memories/{id}/photos/{photo_id}` | `PUT /v1/memories/{id}/photos/{photo_id}` | `DELETE /v1/memories/{id}/photos/{photo_id}` |
 | Profile | `GET /v1/me/profile` | `PUT /v1/me/profile` | Remove keys or send empty `fields`; whole-user deletion also clears it |
 | AI tasks | In `dream.tasks` and journal `status` | `POST /v1/tasks/{id}/retry` | Deleted with their dream or the whole journal |
@@ -18,6 +18,8 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | Patterns | `GET /v1/patterns` | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Groups without members, corrections or a user label are removed by the next refresh |
 
 Lists return `{"items":[…],"has_more":false}`. Pass `limit` (1–200, default 50) and `offset` (default 0). Journal order is date descending, creation time descending, ID ascending; Notes order is recording time descending, ID ascending. Notes additionally accepts `ongoing=true` or `ongoing=false`.
+
+Note search: `POST /v1/memories/search` with `{"query":"a walk by the lake","ongoing":true}` (`ongoing` optional) and the list's paging, ranked like dream search. The wording is embedded once (one unit of the day's text allowance); on the first page, up to `MAX_SEARCH_EMBEDS` (10) notes with Allow AI use on and no vector for their current revision are embedded first, newest first, and kept in `memory_vectors`, so later searches reuse them (notes are not indexed on save). Notes within `SEARCH_MAX_DISTANCE` (0.42, measured on dreams) come back closest first with `similarity`, then notes that carry the words literally with `similarity` null; `ranked` is true. A note with Allow AI use off is never embedded, and switching it off drops its vector. When the vector extension is missing, the allowance is used up or the embedding call fails, `ranked` is false and the search is literal title/text matching in list order (`%`, `_` and `\` match themselves; letters match regardless of ASCII case). A blank query lists every note; one longer than `max_message_chars` returns 413 `too_large`.
 
 ## Journal
 

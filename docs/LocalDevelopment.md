@@ -14,12 +14,17 @@ Clone the code repository and run commands from its root. No wiki checkout or cl
 ./scripts/run-local.sh
 ```
 
-The script runs `uv sync --locked`, creates a local HTTPS certificate valid for 100 days if absent, and starts Granian on port 8443. Certificate/key/database files stay in ignored `backend/.local/`. Foundation sends no AI calls. AI calls go to Vertex AI in the Google Cloud project `dreamlog-511515` (`VERTEX_PROJECT`). Vertex AI takes a short-lived OAuth token instead of a key: the backend mints each one from your gcloud sign-in, so sign in once with an account that may use the project, and pick that account's configuration if it is not your active one:
+The script runs `uv sync --locked`, creates a local HTTPS certificate valid for 100 days if absent, and starts Granian on port 8443. Certificate/key/database files stay in ignored `backend/.local/`. Foundation sends no AI calls. AI calls go to Vertex AI in the Google Cloud project `dreamlog-511515` (`VERTEX_PROJECT`). Vertex AI takes a short-lived OAuth token instead of a key: the backend mints each one from your gcloud sign-in. Sign in once with the Google account that was granted access to the project, then keep that account in its own configuration so it stays separate from any other gcloud account on the Mac:
 
 ```sh
 gcloud auth login
+gcloud config configurations create dreamlog
+gcloud config set account YOUR_GOOGLE_EMAIL
+gcloud config set project dreamlog-511515
 CLOUDSDK_ACTIVE_CONFIG_NAME=dreamlog ./scripts/run-local.sh
 ```
+
+`gcloud auth login` must be the account that was just given permission on `dreamlog-511515`. `configurations create` makes `dreamlog` the active configuration, so the two `config set` lines write the account and project into it. Replace `YOUR_GOOGLE_EMAIL` with that same address. If the configuration already exists, skip `configurations create` and run `gcloud config configurations activate dreamlog` before the `config set` lines. Later launches only need the last line.
 
 Each token lasts an hour, which Google does not extend; the backend runs `VERTEX_TOKEN_COMMAND` (the script sets `gcloud auth print-access-token`) for the next one a minute before the current one expires, so the launcher need not be restarted. Without a gcloud sign-in that command fails, AI calls fail as `provider_config`, and saving and reading still work. An exported `VERTEX_ACCESS_TOKEN` is used as given and never refreshed; the tests use that. The deployed server needs no token or key: its VM's service account issues tokens itself. The provider checks in the wiki still apply before real dreams are sent.
 

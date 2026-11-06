@@ -20,7 +20,7 @@ import patterns
 import providers
 import tasks
 from dreams import delete_dream, get_dream, list_dreams, list_tags, save_correction, save_dream, save_permissions, search_dreams
-from memories import delete_memory, get_memory, list_memories, save_memory
+from memories import delete_memory, get_memory, list_memories, save_memory, search_memories
 from profiles import get_profile, save_profile
 from photos import delete_photo, get_photo, save_photo
 from config import data_directory
@@ -92,6 +92,7 @@ routes.extend([
     Route("/v1/me/profile", get_profile, methods=["GET"]),
     Route("/v1/me/profile", save_profile, methods=["PUT"]),
     Route("/v1/memories", list_memories, methods=["GET"]),
+    Route("/v1/memories/search", search_memories, methods=["POST"]),
     Route("/v1/memories/{memory_id}/photos/{photo_id}", get_photo, methods=["GET"]),
     Route("/v1/memories/{memory_id}/photos/{photo_id}", save_photo, methods=["PUT"]),
     Route("/v1/memories/{memory_id}/photos/{photo_id}", delete_photo, methods=["DELETE"]),
