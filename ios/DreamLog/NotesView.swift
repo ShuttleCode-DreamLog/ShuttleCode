@@ -13,11 +13,13 @@ struct NotesView: View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 13) {
+                    // The search box, count line and empty card follow the Journal page's so both lists search alike.
                     Eyebrow("Your waking world")
                     PageHeading("Small moments matter.")
                     TextField("Search notes…", text: $query).field().submitLabel(.search).onSubmit(search).accessibilityIdentifier("noteSearch")
                     if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
-                    if model.items.isEmpty && !model.isLoading { EmptyCard(model.query.isEmpty ? "No notes yet" : "No matching notes") }
+                    Hint(countLine)
+                    if model.items.isEmpty && !model.isLoading { EmptyCard(model.query.isEmpty ? "No notes yet" : "No recorded note matches") }
                     ForEach(model.items) { note in NavigationLink(value: note.id) { NoteCard(note: note) }.buttonStyle(.plain) }
                     if model.hasMore {
                         Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading)
@@ -48,6 +50,11 @@ struct NotesView: View {
         guard !model.isLoading else { return }
         model.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         Task { await model.load(app) }
+    }
+    private var countLine: String {
+        let count = model.items.count
+        let entries = "\(count)\(model.hasMore ? "+" : "") \(count == 1 ? "note" : "notes")"
+        return (model.query.isEmpty ? "All notes" : "Notes matching “\(model.query)”") + " · \(entries)"
     }
 }
 
