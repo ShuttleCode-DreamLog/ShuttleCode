@@ -216,31 +216,8 @@ struct DreamDetailView: View {
 
     // Tags are pills; each opens its corrections, and a removed tag stays, struck through, until it is restored.
     @ViewBuilder private func tagsBlock(_ dream: Dream) -> some View {
-        if let organization = dream.organization {
-            let editable = organization.status == .current
-            Wrap(spacing: 6) {
-                ForEach(organization.tags.filter { !$0.removed }) { tag in
-                    Menu {
-                        Section("\(tag.category.rawValue.capitalized)\(tag.feeling == .inferred ? " · inferred" : "")\(tag.corrected ? " · your correction" : "") · “\(tag.excerpt)”") {
-                            Button("Show dreams with this tag", systemImage: "line.3.horizontal.decrease") { app.showJournal(tag: tag.text) }
-                            if editable {
-                                Button("Rename…", systemImage: "pencil") { correctionText = tag.text; correcting = .tag(tag) }
-                                if tag.corrected { Button("Restore “\(tag.originalText)”", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
-                                Button("Remove", systemImage: "minus.circle", role: .destructive) {
-                                    Task { await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: "")) }
-                                }
-                            }
-                        }
-                    } label: { Pill(tag.text) }
-                }
-                ForEach(organization.tags.filter(\.removed)) { tag in
-                    Menu {
-                        if editable { Button("Restore", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
-                    } label: { Pill(tag.originalText, struck: true) }
-                    .accessibilityLabel("Removed tag \(tag.originalText)")
-                }
-            }
-            .disabled(model.isSending)
+        TagSelectionControl(selectedIDs: dream.customTags?.map(\.id) ?? [], initialTags: dream.customTags ?? []) { ids in
+            await model.saveTags(app, ids: ids)
         }
     }
 

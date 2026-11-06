@@ -204,3 +204,16 @@ Disabling parallel simulator clones ensures the network test uses the simulator 
 - Live on the local backend with a throwaway user (five invented bridge dreams and one unrelated, real Vertex AI): the group formed after 45 s with 4 dreams; dismiss → 3 with the note listed, repeat → unchanged, empty note → note gone, non-member → 409; split of one dream → 2 remain and a repeat → 409; the one-dream group is not a finding. `DELETE /v1/me` left 0 rows.
 - Found and fixed in the app: the server lists one example per matched tag, so a dream with two tags in a group appeared twice in Supporting dreams, the split toggles and the dismiss buttons, with duplicate `ForEach` ids; `Finding.dreams` now lists each dream once. The dismiss note is refused in the alert when it is over the limit, as the split note already was. DreamLog unit tests: **36 passed, 1 skipped** (the gated HTTPS smoke test).
 - Seen, unchanged: after a dismissal the group's AI texts are cleared and `refresh_findings` gets one attempt plus one retry to name it (wiki 4.8.6, step 5); when both fail the group stays "Unnamed theme" with status current until its membership changes, because `tried_key` stops further paid attempts.
+
+## Manual tag library — 6 November 2026
+
+- `feature/manual-tag-library`: user-owned tag create/rename/delete, normalized duplicate reuse, persistent colors, per-dream selection, new-dream draft persistence and journal filtering. No new AI behavior or drag grouping.
+- Backend: **207 passed**, including tag ownership, atomic creation/attachment, rename/delete propagation and no AI tasks on selection changes. Existing database versions 1–6 upgrade to schema 7; phone drafts upgrade to local schema 2.
+- iPhone 18 Pro / iOS 27 simulator: FoundationTests **40 passed**, including tag request failures and draft reopening. DreamLogUI `TagLibraryTests` **1 passed** against local HTTPS: open full-screen mask, create/select, reopen, rename and delete; screenshot attached to the result bundle. The test creates no dream and requests no AI generation.
+- Runtime check found an old Granian parent/worker still listening alongside the new server. After normal termination did not stop them, the confirmed old processes were removed. The current local backend now serves the new tag routes. No remote deployment performed.
+
+### Existing tags and blurred picker
+
+- Schema 8 links existing effective dream tags to the user library, preserving original categories and sharing labels between Journal, detail and filters. Rename, deselect and delete persist across subsequent reads; import markers prevent deleted tags being recreated by opening the picker. Original AI outputs are retained and no AI generation is requested.
+- Backend **209 passed**, including shared existing labels, ownership, rename/filter consistency and deletion without resurrection. Local HTTPS check confirms an existing dream's 3 selected tags are all in the library and match its Journal labels.
+- Picker now uses dark `.regularMaterial` for a blurred background. The full create/select/reopen/rename/delete UI test passed again on the iPhone 18 Pro simulator against the updated local server.

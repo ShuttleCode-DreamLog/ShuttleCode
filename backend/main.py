@@ -19,6 +19,7 @@ import db
 import patterns
 import providers
 import tasks
+import tag_library
 from dreams import delete_dream, get_dream, list_dreams, list_tags, save_correction, save_dream, save_permissions, search_dreams
 from memories import delete_memory, get_memory, list_memories, save_memory, search_memories
 from profiles import get_profile, save_profile
@@ -89,6 +90,11 @@ async def fault(request):
 
 routes = [Route("/v1/me", get_me, methods=["GET"]), Route("/v1/me", put_me, methods=["PUT"]), Route("/v1/me", delete_me, methods=["DELETE"])]
 routes.extend([
+    Route("/v1/tag-library", tag_library.list_library, methods=["GET"]),
+    Route("/v1/tag-library", tag_library.create_tag, methods=["POST"]),
+    Route("/v1/tag-library/{tag_id}", tag_library.rename_tag, methods=["PUT"]),
+    Route("/v1/tag-library/{tag_id}", tag_library.delete_tag, methods=["DELETE"]),
+    Route("/v1/dreams/{dream_id}/tags", tag_library.save_selection, methods=["PUT"]),
     Route("/v1/me/profile", get_profile, methods=["GET"]),
     Route("/v1/me/profile", save_profile, methods=["PUT"]),
     Route("/v1/memories", list_memories, methods=["GET"]),

@@ -339,3 +339,35 @@ FROM occurrences oc JOIN effective_tags t ON t.tag_id=oc.tag_id
 JOIN outputs o ON o.id=t.output_id
 JOIN dreams d ON d.id=oc.dream_id
 WHERE t.output_status='current' AND d.allow_patterns=1 AND d.allow_analysis=1;
+
+CREATE TABLE IF NOT EXISTS user_tags (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    label_key TEXT NOT NULL,
+    color TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(user_id,label_key)
+);
+CREATE TABLE IF NOT EXISTS dream_user_tags (
+    dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
+    tag_id TEXT NOT NULL REFERENCES user_tags(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY(dream_id,tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS imported_tag_links (
+    source_id TEXT PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tag_id TEXT REFERENCES user_tags(id) ON DELETE SET NULL,
+    source_text TEXT NOT NULL,
+    selected INTEGER NOT NULL DEFAULT 1 CHECK(selected IN (0,1))
+);
+DROP VIEW IF EXISTS visible_user_tags;
+CREATE VIEW visible_user_tags AS
+SELECT d.dream_id,d.user_id,d.tag_id,'custom' AS category,t.created_at AS position
+FROM dream_user_tags d JOIN user_tags t ON t.id=d.tag_id
+UNION ALL
+SELECT e.dream_id,e.user_id,l.tag_id,e.category,e.position
+FROM imported_tag_links l JOIN effective_tags e ON e.tag_id=l.source_id
+WHERE l.tag_id IS NOT NULL AND l.selected=1 AND e.output_status='current';

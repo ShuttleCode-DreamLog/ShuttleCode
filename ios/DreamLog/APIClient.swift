@@ -157,6 +157,23 @@ final class APIClient {
         let result: Result<TaskResponse, APIError> = decode(await response(method: "POST", path: "v1/tasks/\(id)/retry"))
         return result.map(\.task)
     }
+    func loadTagLibrary() async -> Result<TagLibraryResponse, APIError> {
+        decode(await response(method: "GET", path: "v1/tag-library"))
+    }
+    func createLibraryTag(_ text: String) async -> Result<LibraryTag, APIError> {
+        let result: Result<LibraryTagResponse, APIError> = await send("POST", "v1/tag-library", LibraryTagName(text: text))
+        return result.map(\.tag)
+    }
+    func renameLibraryTag(_ id: String, text: String) async -> Result<TagLibraryResponse, APIError> {
+        await send("PUT", "v1/tag-library/\(id)", LibraryTagName(text: text))
+    }
+    func deleteLibraryTag(_ id: String) async -> Result<Void, APIError> {
+        (await response(method: "DELETE", path: "v1/tag-library/\(id)")).map { _ in () }
+    }
+    func saveDreamTags(_ id: String, ids: [String]) async -> Result<Dream, APIError> {
+        let result: Result<DreamResponse, APIError> = await send("PUT", "v1/dreams/\(id)/tags", DreamTagSelection(tagIds: ids))
+        return result.map(\.dream)
+    }
     func loadAnalysis(_ dreamID: String) async -> Result<AnalysisResponse, APIError> {
         decode(await response(method: "GET", path: "v1/dreams/\(dreamID)/analysis"))
     }
