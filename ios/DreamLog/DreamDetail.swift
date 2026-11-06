@@ -105,6 +105,7 @@ struct DreamDetailView: View {
     @State private var showSwitches = false
     @State private var showingSources = false
     @State private var arranging = false
+    @State private var collapsed: Set<String> = []
     @AppStorage(dreamSectionOrderKey) private var sectionOrder = ""
     @State private var confirmingDelete = false
     @State private var confirmingKeepOut = false
@@ -132,8 +133,8 @@ struct DreamDetailView: View {
                     // Sources and the AI switches are kept off the prototype's page until asked for.
                     ForEach(dreamSections(sectionOrder)) { section in sectionBlock(section, dream: dream) }
                     Button("Arrange sections") { arranging = true }.buttonStyle(.quiet).padding(.top, 8).accessibilityIdentifier("arrangeSections")
-                    Heading("AI use")
-                    permissionsBlock(dream)
+                    foldHeading("AI use", key: "aiUse")
+                    if !collapsed.contains("aiUse") { permissionsBlock(dream) }
                 } else if model.isLoading { ProgressView("Loading dream…") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -244,27 +245,44 @@ struct DreamDetailView: View {
     }
 
     @ViewBuilder private func sectionBlock(_ section: DreamSection, dream: Dream) -> some View {
-        switch section {
-        case .tags: tagsBlock(dream)
-        case .originalText:
-            Heading("Original text")
-            Text(dream.text).font(.callout).textSelection(.enabled)
-            if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
-            Button("Edit text") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
-        case .summary:
-            Heading("Summary")
-            organizationBlock(dream)
-        case .analysis:
+        // Every section folds under its heading (Re-Design list, 6 November 2026); the tags get a heading so they can fold too.
+        if section == .analysis {
             // Supporting life notes sit beside the analysis they informed (Re-Design list, Life notes 3).
             HStack(alignment: .firstTextBaseline) {
-                Heading("Analysis")
+                foldHeading(section.title, key: section.rawValue)
                 Spacer()
                 if let value = analysis.analysis {
                     Button("Supporting life notes (\(value.context.count { $0.kind == .memory })) ›") { showingSources = true }
                         .buttonStyle(.quiet).accessibilityIdentifier("analysisSources")
                 }
             }
-            analysisBlock(dream)
+        } else {
+            foldHeading(section.title, key: section.rawValue)
+        }
+        if !collapsed.contains(section.rawValue) { sectionContent(section, dream: dream) }
+    }
+    private func foldHeading(_ title: String, key: String) -> some View {
+        let folded = collapsed.contains(key)
+        return Button { withAnimation(.snappy) { collapsed.formSymmetricDifference([key]) } } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "chevron.down").font(.callout.weight(.semibold)).rotationEffect(.degrees(folded ? -90 : 0)).foregroundStyle(Color.muted)
+                Heading(title)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(folded ? "Collapsed" : "Expanded")
+        .accessibilityIdentifier("fold-\(key)")
+    }
+    @ViewBuilder private func sectionContent(_ section: DreamSection, dream: Dream) -> some View {
+        switch section {
+        case .tags: tagsBlock(dream)
+        case .originalText:
+            Text(dream.text).font(.callout).textSelection(.enabled)
+            if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
+            Button("Edit text") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
+        case .summary: organizationBlock(dream)
+        case .analysis: analysisBlock(dream)
         }
     }
 
