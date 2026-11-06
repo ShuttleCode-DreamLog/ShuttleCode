@@ -130,9 +130,7 @@ async def select_context(connection, dream, use_history):
     ongoing = sorted((memory for memory, _ in scored if memory['is_ongoing']), key=lambda memory: -memory['recorded_at'])
     others = [memory for memory, _ in sorted(((memory, score) for memory, score in scored if not memory['is_ongoing']), key=lambda pair: (-pair[1], -pair[0]['recorded_at']))]
     for number, memory in enumerate((ongoing + others)[:config.MAX_CONTEXT_MEMORIES], 1):
-        when = (f"Event date: {memory['event_date']} ({memory['event_precision']})" if memory['event_date'] else f"From a weekly check-in opened {memory['opened_date']}" if memory['opened_date'] else 'Event date unknown')
-        body = '\n'.join([memory['text'], when, f"Recorded: {local_day(memory['recorded_at'], zone).isoformat()}"] + (['Ongoing'] if memory['is_ongoing'] else []))
-        sources.append({'label': f'M{number}', 'kind': 'memory', 'source_id': memory['id'], 'source_revision': memory['revision'], 'source_date': memory['event_date'], 'cut_to': None, 'body': body})
+        sources.append({'label': f'M{number}', 'kind': 'memory', 'source_id': memory['id'], 'source_revision': memory['revision'], 'source_date': memory['event_date'], 'cut_to': None, 'body': memory_body(memory, zone)})
     candidates = await connection.execute_fetchall("SELECT * FROM dreams WHERE user_id=? AND id<>? AND allow_history=1 AND text<>'' AND dream_date<=?", (dream['user_id'], dream['id'], dream['dream_date']))
     candidate_tags, summaries = {}, {}
     for tag in await current_tags(connection, [candidate['id'] for candidate in candidates]):
@@ -150,6 +148,11 @@ async def select_context(connection, dream, use_history):
         sources.append({'label': f'D{number}', 'kind': 'dream', 'source_id': candidate['id'], 'source_revision': candidate['revision'], 'source_date': candidate['dream_date'],
                         'cut_to': len(text) if len(text) < len(candidate['text']) else None, 'text': text})
     return sources
+
+
+def memory_body(memory, zone):
+    when = (f"Event date: {memory['event_date']} ({memory['event_precision']})" if memory['event_date'] else f"From a weekly check-in opened {memory['opened_date']}" if memory['opened_date'] else 'Event date unknown')
+    return '\n'.join([memory['text'], when, f"Recorded: {local_day(memory['recorded_at'], zone).isoformat()}"] + (['Ongoing'] if memory['is_ongoing'] else []))
 
 
 def zone_of(name):

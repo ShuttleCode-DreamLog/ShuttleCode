@@ -77,7 +77,7 @@ final class DiscussionModel {
         for message in [value.userMessage, value.message] {
             if let index = messages.firstIndex(where: { $0.id == message.id }) { messages[index] = message } else { messages.append(message) }
         }
-        conversation = Conversation(dreamId: dreamId, goal: conversation?.goal, messages: messages, corrections: conversation?.corrections ?? [], analysisWithheld: conversation?.analysisWithheld ?? false)
+        conversation = Conversation(dreamId: dreamId, goal: conversation?.goal, messages: messages, corrections: conversation?.corrections ?? [], analysisWithheld: conversation?.analysisWithheld ?? false, memories: conversation?.memories ?? [])
         streamingText = ""
     }
     func restart(_ app: AppModel) async {
@@ -89,6 +89,21 @@ final class DiscussionModel {
         guard current(app) else { return }
         switch result {
         case let .success(value): conversation = value; pending = nil; contextRestarted = false; error = nil
+        case let .failure(failure): error = failure.message
+        }
+    }
+    // Attaching affects the next turn; detaching a note a reply was given returns the discussion with its messages stale.
+    func attach(_ app: AppModel, memoryID: String, detaching: Bool = false) async {
+        guard !isRestarting, let client = app.client else { return }
+        if epoch == nil { epoch = app.journalEpoch }
+        changes += 1
+        let result = detaching ? await client.detachNote(dreamId, memoryID: memoryID) : await client.attachNote(dreamId, memoryID: memoryID)
+        guard current(app) else { return }
+        switch result {
+        case let .success(value):
+            // A reply still streaming keeps its place; the returned messages cannot contain it yet.
+            conversation = turnInProgress ? Conversation(dreamId: value.dreamId, goal: value.goal, messages: conversation?.messages ?? value.messages, corrections: value.corrections, analysisWithheld: value.analysisWithheld, memories: value.memories) : value
+            error = nil
         case let .failure(failure): error = failure.message
         }
     }
@@ -118,6 +133,7 @@ struct DiscussionView: View {
     @State private var message = ""
     @State private var confirmingRestart = false
     @State private var handoff: Handoff?
+    @State private var choosingNote = false
     @State private var dreamTitle: String
     let dreamId: String
 
@@ -163,6 +179,9 @@ struct DiscussionView: View {
         .onDisappear { model.cancel() }
         .confirmationDialog("Earlier messages stay on this screen and are no longer sent to the AI service.", isPresented: $confirmingRestart, titleVisibility: .visible) {
             Button("Start afresh") { Task { await model.restart(app) } }
+        }
+        .sheet(isPresented: $choosingNote) {
+            NotePicker(attached: Set(model.conversation?.memories.map(\.id) ?? [])) { id in Task { await model.attach(app, memoryID: id) } }
         }
         .sheet(item: $handoff, onDismiss: { app.refreshes += 1 }) { handoff in
             NavigationStack {
@@ -234,6 +253,7 @@ struct DiscussionView: View {
                         .disabled(blank || length > app.limits.maxMessageChars || model.turnInProgress || model.isRestarting || model.pending?.state == .stillWorking)
                 }
                 if length > app.limits.maxMessageChars { Hint("\(length) / \(app.limits.maxMessageChars) characters") }
+                attachedNotes
             }
         }
         .padding(.horizontal, 20).padding(.vertical, 10)
@@ -241,6 +261,53 @@ struct DiscussionView: View {
         .padding(.bottom, app.barHeight)
         .background(Color.paper.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { Rectangle().fill(Color.line).frame(height: 1) }
+    }
+}
+
+extension DiscussionView {
+    // Re-Design, Life notes 2: the + under the message field attaches a life note to the whole discussion.
+    var attachedNotes: some View {
+        let notes = model.conversation?.memories ?? []
+        return Wrap(spacing: 7) {
+            ForEach(notes) { note in
+                Button { Task { await model.attach(app, memoryID: note.id, detaching: true) } } label: {
+                    HStack(spacing: 4) { Text(note.label).strikethrough(!note.allowAnalysis); Image(systemName: "xmark").imageScale(.small) }
+                        .font(.caption).foregroundStyle(note.allowAnalysis ? Color.ink : Color.muted)
+                        .padding(.horizontal, 10).padding(.vertical, 5).background(Color.soft, in: Capsule())
+                }.buttonStyle(.plain).accessibilityLabel("Remove \(note.label)")
+            }
+            Button { choosingNote = true } label: { Label("Life note", systemImage: "plus").font(.caption) }
+                .buttonStyle(.quiet).accessibilityIdentifier("attachNote")
+                .disabled(app.me?.useHistory != true || notes.count >= app.limits.maxAttachedMemories || model.conversation == nil)
+        }
+    }
+}
+
+// Lists the notes that can be given to the AI; picking one attaches it and closes the sheet.
+struct NotePicker: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @State private var model = NotesModel()
+    let attached: Set<String>
+    let choose: (String) -> Void
+    var body: some View {
+        let notes = model.items.filter { $0.allowAnalysis && !attached.contains($0.id) }
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 13) {
+                    if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
+                    if notes.isEmpty && !model.isLoading && model.error == nil { EmptyCard("No notes to add") }
+                    ForEach(notes) { note in Button { choose(note.id); dismiss() } label: { NoteCard(note: note) }.buttonStyle(.plain) }
+                    if model.hasMore { Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading) }
+                    if model.isLoading { ProgressView().frame(maxWidth: .infinity) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
+            }
+            .dreamPage()
+            .page(Header("Add a life note", leading: { Button("Cancel") { dismiss() }.buttonStyle(.quiet) }, trailing: { EmptyView() }), aboveBar: false)
+            .task { await model.load(app) }
+        }
     }
 }
 

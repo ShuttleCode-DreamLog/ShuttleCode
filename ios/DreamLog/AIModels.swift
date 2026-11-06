@@ -208,6 +208,16 @@ nonisolated struct Conversation: Codable, Sendable {
     var messages: [Message]
     var corrections: [Correction]
     var analysisWithheld: Bool
+    var memories: [AttachedNote]
+}
+
+// A life note the user attached to the discussion; every turn sends it while its AI use is on.
+nonisolated struct AttachedNote: Codable, Sendable, Identifiable {
+    var id: String
+    var title: String?
+    var text: String
+    var allowAnalysis: Bool
+    var label: String { title?.isEmpty == false ? title! : text.count > 30 ? "\(text.prefix(30))…" : text.isEmpty ? "Photo note" : text }
 }
 
 nonisolated struct ConversationResponse: Decodable { var conversation: Conversation }

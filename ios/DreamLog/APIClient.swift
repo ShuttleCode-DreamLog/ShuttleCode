@@ -179,6 +179,14 @@ final class APIClient {
         let result: Result<ConversationResponse, APIError> = decode(await response(method: "POST", path: "v1/dreams/\(dreamID)/conversation/restart"))
         return result.map(\.conversation)
     }
+    func attachNote(_ dreamID: String, memoryID: String) async -> Result<Conversation, APIError> {
+        let result: Result<ConversationResponse, APIError> = decode(await response(method: "PUT", path: "v1/dreams/\(dreamID)/conversation/memories/\(memoryID)"))
+        return result.map(\.conversation)
+    }
+    func detachNote(_ dreamID: String, memoryID: String) async -> Result<Conversation, APIError> {
+        let result: Result<ConversationResponse, APIError> = decode(await response(method: "DELETE", path: "v1/dreams/\(dreamID)/conversation/memories/\(memoryID)"))
+        return result.map(\.conversation)
+    }
     // Reads the server-sent events of a discussion turn line by line (wiki 4.2.5); cancelling the consuming task ends the request.
     // It keeps response()'s notice gate and Bearer identity, on its own session with the longer limit.
     func sendTurn(_ dreamID: String, messageID: String, text: String) -> AsyncStream<TurnEvent> {

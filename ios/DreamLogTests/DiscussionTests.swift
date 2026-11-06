@@ -10,7 +10,7 @@ extension FoundationTests {
         return "{\"id\": \"\(id)\", \"seq\": \(seq), \"role\": \"\(role)\", \"text\": \"\(text)\", \"state\": \"\(state)\", \"reply_to\": \(reply), \"offer\": \(hint), \"context\": \(context), \"created_at\": 1760371200000}"
     }
     func conversationJSON(_ messages: [String]) -> Data {
-        Data("{\"conversation\": {\"dream_id\": \"d\", \"goal\": null, \"messages\": [\(messages.joined(separator: ","))], \"corrections\": [], \"analysis_withheld\": false}}".utf8)
+        Data("{\"conversation\": {\"dream_id\": \"d\", \"goal\": null, \"messages\": [\(messages.joined(separator: ","))], \"corrections\": [], \"analysis_withheld\": false, \"memories\": []}}".utf8)
     }
     func stream(_ events: [(String, String)]) -> Data {
         Data(events.map { "event: \($0.0)\r\ndata: \($0.1)\r\n\r\n" }.joined().utf8)

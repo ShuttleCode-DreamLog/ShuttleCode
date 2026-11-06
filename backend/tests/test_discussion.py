@@ -232,6 +232,48 @@ async def test_history_switch_and_indirect_sources(client, chat, clock):
     assert '## ANALYSIS' not in chat.calls[-1]['instruction'] and '## M1' not in chat.calls[-1]['instruction']
 
 
+async def test_attached_notes_go_to_every_turn(client, chat, clock):
+    headers, user, dream_id = await journal(client)
+    memory_id = await note(client, headers, 'Unrelated shoes.', event_date='2026-01-01')
+    attach = lambda memory, dream=dream_id, as_user=headers: client.put(f'/v1/dreams/{dream}/conversation/memories/{memory}', headers=as_user)
+    response = await attach(memory_id)
+    assert response.status_code == 200 and [entry['id'] for entry in response.json()['conversation']['memories']] == [memory_id]
+    assert (await attach(memory_id)).status_code == 200 and len((await conversation(client, headers, dream_id))['memories']) == 1
+    # Another user's note or dream grants nothing.
+    other = credential()
+    assert (await attach(memory_id, as_user=other)).status_code == 404
+    _, _, foreign = await journal(client, headers=other)
+    assert (await attach(memory_id, dream=foreign, as_user=other)).status_code == 404
+    assert (await attach(await note(client, other, 'Theirs.'))).status_code == 404
+    chat.replies.append('OFFER: none\nOne.')
+    done = events((await ask(client, headers, dream_id))[0])[-1][1]
+    assert [entry['label'] for entry in done['message']['context']] == ['DREAM', 'M1'] and 'Unrelated shoes.' in chat.calls[-1]['instruction']
+    chat.replies.append('OFFER: none\nTwo.')
+    await ask(client, headers, dream_id, 'Again')
+    assert 'Unrelated shoes.' in chat.calls[-1]['instruction']
+    # The cap counts only other notes.
+    for text in ('a', 'b'):
+        assert (await attach(await note(client, headers, text))).status_code == 200
+    assert (await attach(await note(client, headers, 'c'))).status_code == 409 and (await attach(memory_id)).status_code == 200
+    # Detaching a note a reply was given restarts the discussion, and later turns leave it out.
+    response = await client.delete(f'/v1/dreams/{dream_id}/conversation/memories/{memory_id}', headers=headers)
+    assert response.status_code == 200 and {message['state'] for message in response.json()['conversation']['messages']} == {'stale'}
+    chat.replies.append('OFFER: none\nThree.')
+    await ask(client, headers, dream_id, 'Third')
+    assert 'Unrelated shoes.' not in chat.calls[-1]['instruction']
+    # A note kept out of AI use cannot be attached and stops being sent; history off sends none.
+    kept = await note(client, headers, 'Private.', allow_analysis=False)
+    assert (await attach(kept)).status_code == 403
+    attached = (await conversation(client, headers, dream_id))['memories'][0]['id']
+    memory = (await client.get(f'/v1/memories/{attached}', headers=headers)).json()['memory']
+    assert (await client.put(f'/v1/memories/{attached}', headers=headers, json={'base_revision': memory['revision'], 'text': memory['text'], 'allow_analysis': False})).status_code == 200
+    assert (await conversation(client, headers, dream_id))['memories'][0]['allow_analysis'] is False
+    assert (await client.put('/v1/me', headers=headers, json={'use_history': False})).status_code == 200
+    chat.replies.append('OFFER: none\nFour.')
+    await ask(client, headers, dream_id, 'Fourth')
+    assert '## M' not in chat.calls[-1]['instruction']
+
+
 async def test_change_during_a_turn_saves_nothing(client, chat, monkeypatch):
     headers, _, dream_id = await journal(client)
     async def changing(instruction, messages):

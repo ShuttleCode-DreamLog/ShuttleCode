@@ -5,7 +5,7 @@ import config
 import db
 import providers
 import streams
-from analysis import notes_of, owned, select_context
+from analysis import memory_body, notes_of, owned, select_context, zone_of
 from web import RequestError, check_id, json_response, read_body, resolve_user
 
 DISCUSS_VERSION = 'discuss-1'
@@ -77,7 +77,9 @@ async def conversation_value(connection, dream):
     messages = [streams.message_value(row, await reply_context(connection, row)) for row in await connection.execute_fetchall('SELECT * FROM messages WHERE dream_id=? ORDER BY seq', (dream['id'],))]
     corrections = await connection.execute_fetchall('SELECT id,message_id,section,output_id,note,created_at FROM discussion_corrections WHERE dream_id=? ORDER BY created_at,id', (dream['id'],))
     output, eligible = await supplied_analysis(connection, dream, await history_switch(connection, dream['user_id']))
-    return {'dream_id': dream['id'], 'goal': goal[0]['goal'] if goal else None, 'messages': messages, 'corrections': [dict(row) for row in corrections], 'analysis_withheld': output is not None and not eligible}
+    attached = await connection.execute_fetchall('SELECT m.id,m.title,m.text,m.allow_analysis FROM conversation_memories a JOIN memories m ON m.id=a.memory_id WHERE a.dream_id=? ORDER BY a.created_at,m.id', (dream['id'],))
+    return {'dream_id': dream['id'], 'goal': goal[0]['goal'] if goal else None, 'messages': messages, 'corrections': [dict(row) for row in corrections], 'analysis_withheld': output is not None and not eligible,
+            'memories': [{**dict(row), 'allow_analysis': bool(row['allow_analysis'])} for row in attached]}
 
 
 async def get_conversation(request):
@@ -92,6 +94,37 @@ async def restart_conversation(request):
     async with db.tx() as connection:
         dream = await owned(connection, identity, dream_id)
         await connection.execute("UPDATE messages SET state='stale' WHERE dream_id=? AND state='ok'", (dream_id,))
+        value = await conversation_value(connection, dream)
+    return json_response({'conversation': value})
+
+
+async def attach_memory(request):
+    identity = await resolve_user(request)
+    dream_id, memory_id = check_id(request.path_params['dream_id']), check_id(request.path_params['memory_id'])
+    async with db.tx() as connection:
+        dream = await owned(connection, identity, dream_id)
+        if not await connection.execute_fetchall('SELECT 1 FROM memories WHERE id=? AND user_id=?', (memory_id, identity)):
+            raise RequestError(404, 'not_found', 'Note not found.')
+        if not await connection.execute_fetchall('SELECT 1 FROM memories WHERE id=? AND allow_analysis=1', (memory_id,)):
+            raise RequestError(403, 'not_permitted', 'This note is kept out of AI use.')
+        # A note already attached is not counted, so sending the same attach again succeeds.
+        others = await connection.execute_fetchall('SELECT COUNT(*) AS n FROM conversation_memories WHERE dream_id=? AND memory_id<>?', (dream_id, memory_id))
+        if others[0]['n'] >= config.LIMITS['max_attached_memories']:
+            raise RequestError(409, 'too_many', f'Attach at most {config.LIMITS['max_attached_memories']} life notes.')
+        await connection.execute('INSERT INTO conversation_memories(dream_id,memory_id,user_id,created_at) VALUES(?,?,?,?) ON CONFLICT DO NOTHING', (dream_id, memory_id, identity, config.now()))
+        value = await conversation_value(connection, dream)
+    return json_response({'conversation': value})
+
+
+async def detach_memory(request):
+    identity = await resolve_user(request)
+    dream_id, memory_id = check_id(request.path_params['dream_id']), check_id(request.path_params['memory_id'])
+    async with db.tx() as connection:
+        dream = await owned(connection, identity, dream_id)
+        await connection.execute('DELETE FROM conversation_memories WHERE dream_id=? AND memory_id=?', (dream_id, memory_id))
+        # Later replies were written with the note in view, so a reply that was given it makes the whole discussion stale (wiki 4.3.5).
+        if await connection.execute_fetchall("SELECT 1 FROM sources s JOIN messages r ON r.id=s.message_id WHERE r.dream_id=? AND r.state='ok' AND s.kind='memory' AND s.source_id=? LIMIT 1", (dream_id, memory_id)):
+            await connection.execute("UPDATE messages SET state='stale' WHERE dream_id=? AND state='ok'", (dream_id,))
         value = await conversation_value(connection, dream)
     return json_response({'conversation': value})
 
@@ -132,7 +165,17 @@ async def send_message(request):
             notes = await notes_of(connection, dream_id)
             goal = await connection.execute_fetchall('SELECT goal FROM conversations WHERE dream_id=?', (dream_id,))
             rows = await connection.execute_fetchall('SELECT * FROM messages WHERE dream_id=? ORDER BY seq', (dream_id,))
+            attached = await connection.execute_fetchall('SELECT m.*,c.opened_date FROM conversation_memories a JOIN memories m ON m.id=a.memory_id LEFT JOIN checkins c ON c.id=m.checkin_id WHERE a.dream_id=? AND m.user_id=? AND m.allow_analysis=1 ORDER BY a.created_at,m.id', (dream_id, identity)) if use_history else []
+            zone = zone_of((await connection.execute_fetchall('SELECT timezone FROM users WHERE id=?', (identity,)))[0]['timezone'])
             indirect = [dict(row) for row in await connection.execute_fetchall("SELECT label,kind,source_id,source_revision,source_date,cut_to FROM sources WHERE output_id=? AND kind IN ('memory','dream')", (output['id'],))] if eligible else []
+        # An attached note select_context did not pick goes in as one more memory source, so the existing checks and Sources list cover it.
+        picked = {source['source_id'] for source in sources if source['kind'] == 'memory'}
+        number = len(picked)
+        for memory in attached:
+            if memory['id'] not in picked:
+                number += 1
+                sources.append({'label': f'M{number}', 'kind': 'memory', 'source_id': memory['id'], 'source_revision': memory['revision'], 'source_date': memory['event_date'], 'cut_to': None,
+                                'body': memory_body(memory, zone) + '\nAttached by the user to this discussion'})
         sentences, blocks = context_blocks(dream, sources)
         if eligible:
             sections = msgspec.json.decode(output['content'])['sections']
@@ -145,7 +188,7 @@ async def send_message(request):
             sources.append({'label': 'NOTES', 'kind': 'notes', 'source_id': dream_id, 'source_revision': dream['revision'], 'source_date': None, 'cut_to': None})
         if goal and goal[0]['goal']:
             blocks.append(f"The user's goal for this discussion:\n{goal[0]['goal']}")
-        sent.update(dream=(dream['revision'], dream['mood'], dream['dream_date']), use_history=use_history, sources=sources, notes=[row['id'] for row in notes], indirect=indirect)
+        sent.update(dream=(dream['revision'], dream['mood'], dream['dream_date']), use_history=use_history, sources=sources, notes=[row['id'] for row in notes], indirect=indirect, attached={memory['id'] for memory in attached})
         return {'instruction': f"{DISCUSS_INSTRUCTION} {' '.join(sentences)}\n\n" + '\n\n'.join(blocks), 'version': DISCUSS_VERSION, 'model': os.environ['TEXT_MODEL'],
                 'messages': [*thread_of(rows, message_id), {'role': 'user', 'content': body.text}], 'sources': [{key: value for key, value in source.items() if key not in ('body', 'text')} for source in sources],
                 'context_restarted': any(row['state'] == 'stale' for row in rows) and not any(row['role'] == 'assistant' and row['state'] == 'ok' for row in rows)}
@@ -155,6 +198,8 @@ async def send_message(request):
         if dream is None or (dream['revision'], dream['mood'], dream['dream_date']) != sent['dream'] or not dream['allow_discussion'] or not dream['text']:
             return None
         if [row['id'] for row in await notes_of(connection, dream_id)] != sent['notes']:
+            return None
+        if not sent['attached'] <= {row['memory_id'] for row in await connection.execute_fetchall('SELECT memory_id FROM conversation_memories WHERE dream_id=?', (dream_id,))}:
             return None
         if (sent['indirect'] or any(source['kind'] in ('memory', 'dream') for source in sent['sources'])) and not (sent['use_history'] and await history_switch(connection, identity)):
             return None

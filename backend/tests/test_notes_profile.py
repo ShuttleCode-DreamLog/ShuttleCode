@@ -86,13 +86,15 @@ async def test_new_routes_require_bearer(client):
         assert (await client.request(method,path,json=note())).status_code == 401
 
 
-@pytest.mark.parametrize('version', [1, 2, 3, 4, 5])
+@pytest.mark.parametrize('version', [1, 2, 3, 4, 5, 6])
 async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     path = tmp_path / 'v1.db'
     connection = sqlite3.connect(path)
     schema = Path(db.__file__).with_name('schema.sql').read_text()
     connection.executescript(schema)
-    connection.execute('ALTER TABLE memories DROP COLUMN title')
+    connection.execute('DROP TABLE conversation_memories')
+    if version <= 5:
+        connection.execute('ALTER TABLE memories DROP COLUMN title')
     if version <= 4:
         connection.execute('DROP TABLE dream_vectors')
     if version <= 3:
@@ -113,13 +115,14 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     connection.close()
     upgraded = await db.open_database(path)
     try:
-        assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == 6
+        assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == 7
         assert (await upgraded.execute_fetchall('SELECT text FROM dreams WHERE id=?',(dream_id,)))[0][0] == 'Kept sample'
         assert [tuple(row) for row in await upgraded.execute_fetchall('SELECT title,text FROM memories')] == [(None, 'Kept note')]
         assert not await upgraded.execute_fetchall('SELECT * FROM profiles')
         assert not await upgraded.execute_fetchall('SELECT * FROM pattern_groups')
         assert not await upgraded.execute_fetchall('SELECT * FROM dream_vectors')
         assert not await upgraded.execute_fetchall('SELECT * FROM current_occurrences')
+        assert not await upgraded.execute_fetchall('SELECT * FROM conversation_memories')
         assert not await upgraded.execute_fetchall('PRAGMA foreign_key_check')
     finally:
         await upgraded.close()

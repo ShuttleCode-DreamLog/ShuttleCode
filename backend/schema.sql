@@ -138,6 +138,15 @@ CREATE TABLE IF NOT EXISTS conversations (
     updated_at INTEGER NOT NULL
 );
 
+-- Version 7: life notes the user attached to a dream's discussion; each turn sends them as memory sources.
+CREATE TABLE IF NOT EXISTS conversation_memories (
+    dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
+    memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(dream_id, memory_id)
+);
+
 CREATE TABLE IF NOT EXISTS discussion_corrections (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

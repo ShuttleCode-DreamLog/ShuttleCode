@@ -40,7 +40,7 @@ async def test_settings_are_owned_and_partial_updates_preserve_fields(client):
     initial = (await client.get('/v1/me', headers=first)).json()
     assert initial['use_history'] is True
     assert initial['reminder_weekday'] is None
-    assert len(initial['limits']) == 12 and len(initial['usage']) == 3
+    assert len(initial['limits']) == 13 and len(initial['usage']) == 3
     response = await client.put('/v1/me', headers=first, json={'timezone': 'America/Detroit', 'reminder_weekday': 4, 'use_history': False, 'user_id': second['Authorization'][7:]})
     assert response.status_code == 200
     assert response.json()['use_history'] is False
@@ -201,7 +201,7 @@ async def test_schema_mismatch_refuses_startup(tmp_path):
     connection = sqlite3.connect(path)
     connection.execute('PRAGMA user_version=99')
     connection.close()
-    with pytest.raises(RuntimeError, match='Schema version 99; expected 6'):
+    with pytest.raises(RuntimeError, match='Schema version 99; expected 7'):
         await db.open_database(path)
 
 

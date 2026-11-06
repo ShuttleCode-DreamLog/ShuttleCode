@@ -27,6 +27,7 @@ nonisolated struct Limits: Codable, Sendable {
     var maxSceneChars = 4000
     var maxRecordingSeconds = 600
     var maxAudioBytes = 10000000
+    var maxAttachedMemories = 3
 }
 
 nonisolated struct SettingsSave: Encodable, Sendable {
