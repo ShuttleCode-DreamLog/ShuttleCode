@@ -287,7 +287,8 @@ struct DreamDetailView: View {
                 ForEach(Array(value.sections.enumerated()), id: \.offset) { _, section in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(section.kind.heading).font(.callout.weight(.semibold))
-                        Text(value.text(of: section)).font(.callout)
+                        // Symbols arrive as "- **Name:** …" lines; inline markdown renders the bold and keeps the line breaks.
+                        Text((try? AttributedString(markdown: value.text(of: section), options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(value.text(of: section))).font(.callout)
                         Hint("Sources: \(value.sources(of: section).joined(separator: ", "))")
                     }.padding(.top, 4)
                 }

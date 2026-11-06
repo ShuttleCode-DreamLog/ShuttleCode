@@ -1,19 +1,14 @@
 import Foundation
 
 nonisolated enum SectionKind: String, Codable, Sendable {
-    case whatHappened = "what_happened", emotionalMovement = "emotional_movement", wakingLifeConnections = "waking_life_connections"
-    case themesAndReadings = "themes_and_readings", threatAndResponse = "threat_and_response", relatedDreams = "related_dreams"
-    case reflectionQuestions = "reflection_questions", unknown
+    case dreamReplay = "dream_replay", emotionalUndercurrent = "emotional_undercurrent", symbols, wakingLife = "waking_life", unknown
     init(from decoder: any Decoder) throws { self = SectionKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
     var heading: String {
         switch self {
-        case .whatHappened: "What happened"
-        case .emotionalMovement: "How the feelings moved"
-        case .wakingLifeConnections: "Possible links to waking life"
-        case .themesAndReadings: "Possible meanings"
-        case .threatAndResponse: "Threat and response"
-        case .relatedDreams: "Related dreams"
-        case .reflectionQuestions: "Questions to reflect on"
+        case .dreamReplay: "Dream Replay"
+        case .emotionalUndercurrent: "Emotional Undercurrent"
+        case .symbols: "Symbols"
+        case .wakingLife: "Waking Life"
         case .unknown: "Reflection"
         }
     }
