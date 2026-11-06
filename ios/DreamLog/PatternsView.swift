@@ -167,12 +167,12 @@ struct ExampleCard: View {
     }
 }
 
-// The prototype's pattern page: Rename, Supporting dreams, Summary & analysis; split and dismiss stay under Correct this pattern.
+// Pattern titles use the same inline edit session as dreams and life notes.
 struct PatternDetailView: View {
     @Environment(AppModel.self) private var app
     let groupId: String
     let model: PatternsModel
-    @State private var renaming = false
+    @State private var editing = false
     @State private var name = ""
     @State private var correcting = false
     @State private var moving: Set<String> = []
@@ -187,11 +187,7 @@ struct PatternDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if let error = model.error { ErrorCard(error) }
                 if let response = model.response, let finding {
-                    HStack {
-                        Eyebrow("A thread across dreams")
-                        Spacer()
-                        Button("Rename") { name = finding.label ?? ""; renaming = true }.buttonStyle(.secondary)
-                    }
+                    Eyebrow("A thread across dreams")
                     Text("\(finding.periodCount) of \(response.eligibleDreams) eligible recorded dreams (\(displayDate(response.period.fromDate)) – \(displayDate(response.period.toDate))), in \(finding.supportingDreams) recorded dreams in all.")
                         .font(.callout)
                     if let trend = trendText(finding, response) { Hint(trend) }
@@ -223,13 +219,14 @@ struct PatternDetailView: View {
             .padding(24)
         }
         .dreamPage()
-        .page(Header(finding?.name ?? "Pattern", leading: { BackButton() }, trailing: { HomeButton() }))
-        .alert("Rename pattern", isPresented: $renaming) {
-            TextField("Pattern name", text: $name)
-            Button("Save") { rename() }
-            if finding?.labelCorrected == true { Button("Use generated name") { if let finding { Task { await model.rename(app, finding, label: "") } } } }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Corrections change the pattern, not your dream text.") }
+        .page(Header(finding?.name ?? "Pattern", editableTitle: Binding(get: { editing ? name : finding?.name ?? "Pattern" }, set: { name = $0 }), isEditing: editing, leading: { BackButton() }, trailing: {
+            Button(editing ? "Save" : "Edit") {
+                if editing { rename() }
+                else { name = finding?.name ?? ""; editing = true }
+            }.buttonStyle(.quiet).disabled(model.isSending || finding == nil)
+            HomeButton()
+        }))
+        .editingIndicator(editing)
         .confirmationDialog("The dreams you move will not be grouped with the others again, in either direction. A note written with a split cannot be removed later.", isPresented: $confirmingSplit, titleVisibility: .visible) {
             Button("Save Split") {
                 guard let finding else { return }
@@ -248,8 +245,12 @@ struct PatternDetailView: View {
     private func rename() {
         guard let finding else { return }
         let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !label.isEmpty, label.count <= app.limits.maxLabelChars else { model.error = "Give the pattern a name of 1 to \(app.limits.maxLabelChars) characters."; return }
-        Task { await model.rename(app, finding, label: label) }
+        guard label.unicodeScalars.count <= app.limits.maxLabelChars else { model.error = "Keep the pattern name within \(app.limits.maxLabelChars) characters."; return }
+        guard label != finding.name else { editing = false; return }
+        Task {
+            await model.rename(app, finding, label: label)
+            if model.error == nil { editing = false }
+        }
     }
     private func trendText(_ finding: Finding, _ response: PatternsResponse) -> String? {
         let comparison = "\(finding.periodCount) of \(response.eligibleDreams) now, \(finding.previousCount) of \(response.previousEligibleDreams) in the period before"

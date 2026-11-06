@@ -4,15 +4,23 @@ import UIKit
 // The prototype's header: a left-aligned serif title between the page's leading and trailing controls, on paper with a hairline.
 struct Header<Leading: View, Trailing: View>: View {
     let title: String
+    var editableTitle: Binding<String>? = nil
+    var isEditing = false
     let leading: Leading
     let trailing: Trailing
-    init(_ title: String, @ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
-        self.title = title; self.leading = leading(); self.trailing = trailing()
+    init(_ title: String, editableTitle: Binding<String>? = nil, isEditing: Bool = false, @ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title; self.editableTitle = editableTitle; self.isEditing = isEditing; self.leading = leading(); self.trailing = trailing()
     }
     var body: some View {
         HStack(spacing: 12) {
             leading
-            Text(title).font(.system(size: 29, design: .serif)).foregroundStyle(Color.ink).lineLimit(1).minimumScaleFactor(0.6)
+            if let editableTitle {
+                InlineEditableText(text: editableTitle, isEditing: isEditing, placeholder: title, singleLine: true)
+                    .font(.system(size: 29, design: .serif)).foregroundStyle(Color.ink)
+                    .accessibilityIdentifier("editablePageTitle")
+            } else {
+                Text(title).font(.system(size: 29, design: .serif)).foregroundStyle(Color.ink).lineLimit(1).minimumScaleFactor(0.6)
+            }
             Spacer(minLength: 0)
             trailing
         }
@@ -128,4 +136,107 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
         interactivePopGestureRecognizer?.delegate = self
     }
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool { viewControllers.count > 1 }
+}
+
+// Reading and editing share the same layout; a field only appears after a double tap.
+struct InlineEditableText: View {
+    @Binding var text: String
+    let isEditing: Bool
+    var placeholder = ""
+    var singleLine = false
+    @State private var active = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Group {
+            if isEditing && active {
+                TextField(placeholder, text: $text, axis: singleLine ? .horizontal : .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focused)
+                    .onAppear { focused = true }
+                    .onSubmit { if singleLine { active = false } }
+            } else {
+                Text(text.isEmpty ? placeholder : text)
+                    .lineLimit(singleLine ? 1 : nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { if isEditing { active = true } }
+                    .accessibilityHint(isEditing ? "Double tap to edit" : "")
+                    .accessibilityAction(named: "Edit text") { if isEditing { active = true } }
+            }
+        }
+        .onChange(of: isEditing) { _, editing in if !editing { active = false; focused = false } }
+        .onChange(of: focused) { _, value in if !value { active = false } }
+    }
+}
+
+// A short wave travels across the characters, then pauses before starting again.
+private struct EditingWaveText: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var startedAt = Date.now
+    private let message = "edit in progress..."
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || scenePhase != .active)) { timeline in
+            let elapsed = max(0, timeline.date.timeIntervalSince(startedAt))
+            HStack(spacing: 0) {
+                ForEach(Array(message.enumerated()), id: \.offset) { index, character in
+                    Text(String(character))
+                        .offset(y: reduceMotion ? 0 : waveOffset(at: index, elapsed: elapsed))
+                }
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(Color.muted)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(message)
+    }
+
+    private func waveOffset(at index: Int, elapsed: TimeInterval) -> CGFloat {
+        let travelDuration = 1.5
+        let pauseDuration = 0.4
+        let halfWidth = 2.0
+        let time = elapsed.truncatingRemainder(dividingBy: travelDuration + pauseDuration)
+        guard time < travelDuration else { return 0 }
+
+        // Start and end outside the text so the whole pulse enters and leaves smoothly.
+        let center = -halfWidth + (Double(message.count - 1) + 2 * halfWidth) * time / travelDuration
+        let distance = (Double(index) - center) / halfWidth
+        guard abs(distance) < 1 else { return 0 }
+
+        let envelope = (1 + cos(.pi * distance)) / 2
+        return CGFloat(2.5 * sin(.pi * distance) * envelope)
+    }
+}
+
+private struct EditingIndicator: ViewModifier {
+    @Environment(AppModel.self) private var app
+    let editing: Bool
+    let aboveBar: Bool
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .bottomTrailing) {
+            if editing {
+                VStack(alignment: .trailing, spacing: 4) {
+                    EditingWaveText()
+                        .accessibilityIdentifier("editingIndicator")
+                    Text("double tap your text to edit.")
+                        .font(.caption)
+                        .foregroundStyle(Color.muted)
+                        .accessibilityLabel("double tap your text to edit.")
+                }
+                    .multilineTextAlignment(.trailing)
+                    .padding(10).background(Color.paper, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.trailing, 20).padding(.bottom, (aboveBar ? app.barHeight : 0) + 10)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+extension View {
+    func editingIndicator(_ editing: Bool, aboveBar: Bool = true) -> some View {
+        modifier(EditingIndicator(editing: editing, aboveBar: aboveBar))
+    }
 }

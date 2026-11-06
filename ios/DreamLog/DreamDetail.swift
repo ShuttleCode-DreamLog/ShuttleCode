@@ -76,11 +76,6 @@ final class AnalysisModel {
     }
 }
 
-nonisolated enum CorrectionTarget: Identifiable {
-    case summary, tag(Tag)
-    var id: String { if case let .tag(tag) = self { tag.id } else { "summary" } }
-}
-
 // The six switches (wiki 4.5.8); their explanatory lines are not shown, the privacy notice covers what each AI use sends.
 let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, title: String)] = [
     ("analysis", \.analysis, "Analysis"),
@@ -91,7 +86,6 @@ let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, titl
     ("visuals", \.visuals, "Visuals")
 ]
 let historyOffLine = "Turning this off removes the parts of analyses that cite it and starts the discussions that used it afresh. Turning it on again does not bring them back."
-let correctionLine = "A correction marks the analysis as outdated and starts the discussion afresh."
 
 // The dream page's sections a user can reorder (Re-Design list, AI use); the date row stays first and AI use stays last.
 nonisolated enum DreamSection: String, CaseIterable, Identifiable {
@@ -125,8 +119,9 @@ struct DreamDetailView: View {
     @State private var confirmingKeepOut = false
     @State private var confirmingHistoryOff = false
     @State private var confirmingRefresh = false
-    @State private var correcting: CorrectionTarget?
-    @State private var correctionText = ""
+    @State private var tagEdits: [String: String] = [:]
+    @State private var saving = false
+    @State private var confirmingClose = false
     let id: String
 
     init(id: String) {
@@ -142,7 +137,6 @@ struct DreamDetailView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Hint(displayDate(dream.dreamDate) + (model.draft?.unsent == true ? " · Waiting to sync" : ""))
                         Spacer()
-                        Button("Edit", systemImage: "pencil") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
                     }
                     // Sources and the AI switches are kept off the prototype's page until asked for.
                     ForEach(dreamSections(sectionOrder)) { section in sectionBlock(section, dream: dream) }
@@ -156,10 +150,22 @@ struct DreamDetailView: View {
             .padding(24)
         }
         .dreamPage()
-        .page(Header(model.dream?.title ?? "Dream", leading: { BackButton() }, trailing: { HomeButton() }))
-        .sheet(isPresented: $editing, onDismiss: { Task { await load() } }) {
-            NavigationStack { DreamEditorView(id: id, presented: true) }
-        }
+        .page(Header("Dream", editableTitle: dreamTitle, isEditing: editing, leading: { BackButton {
+            if editing && (model.draft?.unsent == true || !tagEdits.isEmpty) { confirmingClose = true }
+            else { dismiss() }
+        } }, trailing: {
+            Button(editing ? "Save" : "Edit") {
+                if editing { Task { await saveEdits() } }
+                else { editing = true; app.editing.insert(id) }
+            }.buttonStyle(.quiet)
+                .disabled(saving || model.isSending || model.draft == nil || (editing && !model.canSave(app)))
+                .accessibilityIdentifier("editSaveDream")
+            HomeButton()
+        }))
+        .editingIndicator(editing)
+        .disabled(saving)
+        .onAppear { if editing { app.editing.insert(id) } }
+        .onDisappear { app.editing.remove(id) }
         // The sheet is its own presentation, so it carries the routes its note and dream links open.
         .sheet(isPresented: $showingSources, onDismiss: { Task { await load() } }) {
             NavigationStack {
@@ -200,6 +206,16 @@ struct DreamDetailView: View {
         .task { await load() }
         .reloadable { await load() }
         .onChange(of: app.refreshes) { Task { await load() } }
+        .confirmationDialog("This dream has unsaved changes.", isPresented: $confirmingClose, titleVisibility: .visible) {
+            Button("Save and close") { Task { await saveEdits(); if !editing { dismiss() } } }.disabled(!model.canSave(app))
+            Button("Discard", role: .destructive) {
+                Task {
+                    await model.discardChanges(app)
+                    if model.draft?.unsent == false { dismiss() }
+                }
+            }
+            Button("Keep editing", role: .cancel) {}
+        }
         .confirmationDialog("Delete this dream? Deleting this dream also removes the analyses of other dreams and the discussion replies that were written with it.", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Dream", role: .destructive) { Task { await model.delete(app); if model.deleted { dismiss() } } }
         }
@@ -212,11 +228,36 @@ struct DreamDetailView: View {
         .confirmationDialog("A new analysis replaces this one and starts this dream's discussion afresh.\(allowance)", isPresented: $confirmingRefresh, titleVisibility: .visible) {
             Button("Update Analysis") { Task { await analysis.refresh(app) } }
         }
-        .alert(correctionTitle, isPresented: Binding(get: { correcting != nil }, set: { if !$0 { correcting = nil } }), presenting: correcting) { target in
-            TextField("New wording", text: $correctionText)
-            Button("Save") { Task { await saveCorrection(target) } }
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in Text(correctionLine) }
+
+    }
+
+    private var dreamTitle: Binding<String> {
+        Binding(get: { if let draft = model.draft { draft.title ?? "" } else { model.dream?.title ?? "" } }, set: { value in
+            model.change(app) { $0.title = value.isEmpty ? nil : value }
+        })
+    }
+    private var dreamText: Binding<String> {
+        Binding(get: { model.draft?.text ?? model.dream?.text ?? "" }, set: { value in model.change(app) { $0.text = value } })
+    }
+    private func saveEdits() async {
+        guard !saving else { return }
+        saving = true
+        defer { saving = false }
+        // Apply tag corrections before saving source text, which can mark organization outdated.
+        for tag in model.dream?.organization?.tags ?? [] {
+            if let text = tagEdits[tag.id], text != tag.text {
+                await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: text))
+                guard model.error == nil else { return }
+                tagEdits.removeValue(forKey: tag.id)
+            }
+        }
+        if model.draft?.unsent == true {
+            await model.save(app)
+            guard model.draft?.unsent == false else { return }
+        }
+        tagEdits = [:]; editing = false
+        app.editing.remove(id)
+        await load()
     }
 
     private func load() async {
@@ -230,28 +271,26 @@ struct DreamDetailView: View {
         guard let text = app.me?.usage.first(where: { $0.kind == "text" }) else { return "" }
         return " About \(max(0, text.cap - text.used)) text generations are left today."
     }
-    private var correctionTitle: String {
-        if case let .tag(tag) = correcting { "Rename “\(tag.text)”" } else { "Correct the summary" }
-    }
-
     // Tags are pills; each opens its corrections, and a removed tag stays, struck through, until it is restored.
     @ViewBuilder private func tagsBlock(_ dream: Dream) -> some View {
         if let organization = dream.organization {
             let editable = organization.status == .current
             Wrap(spacing: 6) {
                 ForEach(organization.tags.filter { !$0.removed }) { tag in
-                    Menu {
+                    InlineEditableText(text: Binding(get: { tagEdits[tag.id] ?? tag.text }, set: { tagEdits[tag.id] = $0 }), isEditing: editing && editable, singleLine: true)
+                        .font(.caption2).foregroundStyle(Color.ink)
+                        .padding(.horizontal, 9).padding(.vertical, 3).background(Color.soft, in: Capsule())
+                        .contextMenu {
                         Section("\(tag.category.rawValue.capitalized)\(tag.feeling == .inferred ? " · inferred" : "")\(tag.corrected ? " · your correction" : "") · “\(tag.excerpt)”") {
                             Button("Show dreams with this tag", systemImage: "line.3.horizontal.decrease") { app.showJournal(tag: tag.text) }
                             if editable {
-                                Button("Rename…", systemImage: "pencil") { correctionText = tag.text; correcting = .tag(tag) }
                                 if tag.corrected { Button("Restore “\(tag.originalText)”", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
                                 Button("Remove", systemImage: "minus.circle", role: .destructive) {
                                     Task { await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: "")) }
                                 }
                             }
                         }
-                    } label: { Pill(tag.text) }
+                    }
                 }
                 ForEach(organization.tags.filter(\.removed)) { tag in
                     Menu {
@@ -298,7 +337,19 @@ struct DreamDetailView: View {
         switch section {
         case .tags: tagsBlock(dream)
         case .originalText:
-            Text(dream.text).font(.callout).textSelection(.enabled)
+            InlineEditableText(text: dreamText, isEditing: editing).font(.callout).accessibilityIdentifier("journalText")
+            if model.draft?.conflict == true {
+                Button("Reload stored entry") { Task { await model.load(app) } }.buttonStyle(.secondary)
+                if model.conflictReloaded {
+                    Text(dream.text).font(.callout)
+                    Button("Keep both") { model.keepBoth(app) }.buttonStyle(.secondary)
+                    Button("Use my text") { Task { await model.useMyText(app) } }.buttonStyle(.secondary)
+                    Button("Use stored text") { Task { await model.discardChanges(app) } }.buttonStyle(.secondary)
+                }
+            }
+            if model.missing {
+                Button("Save as a new journal entry") { Task { await model.saveAsNew(app) } }.buttonStyle(.secondary)
+            }
             if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
         case .summary: organizationBlock(dream)
         case .analysis: analysisBlock(dream)
@@ -342,11 +393,8 @@ struct DreamDetailView: View {
             }
             if let organization = dream.organization {
                 if organization.status != .current { Hint("Outdated after an edit") }
-                Text(organization.summary).font(.callout)
+                Text(organization.summary).font(.callout).textSelection(.enabled)
                 if organization.summaryCorrected { Hint("Your correction") }
-                if organization.status == .current {
-                    Button("Correct summary") { correctionText = organization.summary; correcting = .summary }.buttonStyle(.quiet)
-                }
             } else if organize == nil {
                 Hint(dream.permissions.analysis ? "No summary yet" : "Analysis is off")
             }
@@ -356,14 +404,6 @@ struct DreamDetailView: View {
     private func restore(_ tag: Tag) async {
         await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: tag.originalText))
     }
-    private func saveCorrection(_ target: CorrectionTarget) async {
-        let text = correctionText.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch target {
-        case .summary: if !text.isEmpty { await model.correct(app, DreamCorrection(category: "summary", text: text)) }
-        case let .tag(tag): await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: text))
-        }
-    }
-
     // What the analysis presents follows the order of the wiki 4.6.7 table.
     private func analysisBlock(_ dream: Dream) -> some View {
         let task = analysis.task

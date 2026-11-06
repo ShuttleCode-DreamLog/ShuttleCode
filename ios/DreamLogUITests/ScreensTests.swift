@@ -69,7 +69,7 @@ final class ScreensTests: XCTestCase {
         app.buttons["Cancel"].tap()
 
         app.staticTexts["Night bridge"].firstMatch.tap()
-        XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["editSaveDream"].waitForExistence(timeout: 10))
         sleep(3)
         snapshot(app, "S03 Dream Detail 1")
         for page in 2...4 {

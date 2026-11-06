@@ -2,7 +2,13 @@ import XCTest
 
 @MainActor
 final class EditorTests: XCTestCase {
-    func testFirstNoteSaveAndJournalAutomaticSaveAndRevert() {
+    private func inlineField(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ AND (elementType == %d OR elementType == %d)",
+            identifier, XCUIElement.ElementType.textField.rawValue, XCUIElement.ElementType.textView.rawValue
+        )).firstMatch
+    }
+    func testUnifiedInlineEditingAndSave() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launch()
@@ -29,6 +35,24 @@ final class EditorTests: XCTestCase {
         XCTAssertTrue(app.staticTexts[noteText].waitForExistence(timeout: 10))
         app.staticTexts[noteText].tap()
         XCTAssertTrue(app.buttons["Edit"].waitForExistence(timeout: 5))
+        let noteBody = app.staticTexts["noteText"]
+        noteBody.doubleTap()
+        XCTAssertFalse(inlineField(app, "noteText").exists)
+        app.buttons["Edit"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["editingIndicator"].waitForExistence(timeout: 3))
+        XCTAssertFalse(inlineField(app, "noteText").exists)
+        noteBody.doubleTap()
+        let inlineNote = inlineField(app, "noteText")
+        XCTAssertTrue(inlineNote.waitForExistence(timeout: 3))
+        inlineNote.typeText(" Updated.")
+        app.staticTexts["editablePageTitle"].doubleTap()
+        let noteTitle = inlineField(app, "editablePageTitle")
+        XCTAssertTrue(noteTitle.waitForExistence(timeout: 3))
+        noteTitle.typeText("Edited life note")
+        app.buttons["saveNote"].tap()
+        XCTAssertTrue(app.staticTexts[noteText + " Updated."].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.descendants(matching: .any)["editingIndicator"].exists)
+        XCTAssertTrue(app.staticTexts["Edited life note"].exists)
         let deleteNote = app.buttons["Delete note"]
         if !deleteNote.isHittable { app.swipeUp() }
         deleteNote.tap()
@@ -65,16 +89,31 @@ final class EditorTests: XCTestCase {
         app.buttons["Done"].tap()
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 10))
         app.staticTexts[title].firstMatch.tap()
-        XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 5))
-        app.buttons["Edit Dream"].tap()
-        XCTAssertTrue(journalEditor.waitForExistence(timeout: 5))
-        journalEditor.tap(); journalEditor.typeText(" Discard this edit.")
-        app.buttons["revertJournal"].tap()
-        app.buttons["Revert changes"].tap()
-        XCTAssertTrue(app.staticTexts["Original invented dream."].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Original invented dream. Discard this edit."].exists)
-        app.buttons["Done"].tap()
-        XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 5))
+        let editSave = app.buttons["editSaveDream"]
+        XCTAssertTrue(editSave.waitForExistence(timeout: 5))
+        let original = app.staticTexts["Original invented dream."]
+        original.doubleTap()
+        XCTAssertFalse(inlineField(app, "journalText").exists)
+        editSave.tap()
+        XCTAssertEqual(editSave.label, "Save")
+        XCTAssertTrue(app.descendants(matching: .any)["editingIndicator"].waitForExistence(timeout: 3))
+        XCTAssertFalse(inlineField(app, "journalText").exists)
+        original.doubleTap()
+        let inlineDream = inlineField(app, "journalText")
+        XCTAssertTrue(inlineDream.waitForExistence(timeout: 3))
+        inlineDream.typeText(" Updated.")
+        app.staticTexts[title].doubleTap()
+        let inlineTitle = inlineField(app, "editablePageTitle")
+        XCTAssertTrue(inlineTitle.waitForExistence(timeout: 3))
+        inlineTitle.typeText(" renamed")
+        editSave.tap()
+        XCTAssertTrue(app.staticTexts["Original invented dream. Updated."].waitForExistence(timeout: 10))
+        XCTAssertEqual(editSave.label, "Edit")
+        XCTAssertFalse(app.descendants(matching: .any)["editingIndicator"].exists)
+        app.buttons["Back"].tap()
+        XCTAssertTrue(app.staticTexts[title + " renamed"].waitForExistence(timeout: 10))
+        app.staticTexts[title + " renamed"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Original invented dream. Updated."].waitForExistence(timeout: 10))
         let deleteDream = app.buttons["Delete Dream"]
         for _ in 0..<10 where !(deleteDream.exists && deleteDream.isHittable) { app.swipeUp() }
         // Delete Dream ends the page; the drawn bar covers the page's last stretch until it is scrolled to the end.

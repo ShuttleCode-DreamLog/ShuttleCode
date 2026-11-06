@@ -136,15 +136,10 @@ struct NoteEditorView: View {
                 if let error = model.error {
                     if model.isEditing { ErrorCard(error) } else { ErrorCard(error, retry: reload) }
                 }
-                if model.isEditing { editingBlock } else if let stored = model.stored { readingBlock(stored) }
+                if newEntry && model.stored == nil { editingBlock } else if let stored = model.stored { readingBlock(stored) }
                 photosBlock
                 aiUseBlock
-                if model.isEditing {
-                    HStack(spacing: 10) {
-                        Button("Cancel") { cancel() }.buttonStyle(.secondary)
-                        Button("Save note") { Task { await save() } }.buttonStyle(.primary).disabled(!model.canSave(app)).accessibilityIdentifier("saveNote")
-                    }.padding(.top, 8)
-                } else if model.stored != nil {
+                if model.stored != nil {
                     Button("Delete note", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet).padding(.top, 8)
                 }
             }
@@ -153,6 +148,7 @@ struct NoteEditorView: View {
         }
         .dreamPage()
         .page(header, aboveBar: !newEntry)
+        .editingIndicator(model.isEditing, aboveBar: !newEntry)
         .disabled(model.isSending)
         .task { await model.load(app) }
         .interactiveDismissDisabled(model.hasChanges || model.isSending || model.isAddingPhotos)
@@ -176,13 +172,18 @@ struct NoteEditorView: View {
             Text(model.error ?? "The note was not saved. Your input is still here; try again.")
         }
     }
-    @ViewBuilder private var header: some View {
-        let title = model.isEditing ? (newEntry ? "New note" : "Edit note") : (model.stored.map(noteLabel) ?? "Note")
-        if newEntry {
-            Header(title, leading: { BackButton(label: "Done") { close() } }, trailing: { EmptyView() })
-        } else {
-            Header(title, leading: { BackButton() }, trailing: { HomeButton() })
-        }
+    private var header: some View {
+        Header(newEntry && model.stored == nil ? "New note" : "Note",
+               editableTitle: Binding(get: { model.value.title }, set: { model.value.title = $0 }),
+               isEditing: model.isEditing,
+               leading: { BackButton(label: newEntry ? "Done" : "Back") { close() } }, trailing: {
+            Button(model.isEditing ? "Save" : "Edit") {
+                if model.isEditing { Task { await save() } } else { model.isEditing = true }
+            }.buttonStyle(.quiet)
+                .disabled(model.isLoading || model.isSending || (model.isEditing && !model.canSave(app)))
+                .accessibilityIdentifier("saveNote")
+            if !newEntry { HomeButton() }
+        })
     }
     @ViewBuilder private var editingBlock: some View {
         @Bindable var editor = model
@@ -231,20 +232,44 @@ struct NoteEditorView: View {
         if model.missing { Button("Save as a new note") { Task { await model.saveAsNew(app) } }.buttonStyle(.secondary) }
     }
     @ViewBuilder private func readingBlock(_ stored: Memory) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Hint(stored.eventDate.map(displayDate) ?? stored.recordedAt.formatted(date: .abbreviated, time: .omitted))
-            Spacer()
-            Button("Edit", systemImage: "pencil") { model.isEditing = true }.buttonStyle(.secondary)
-        }
-        Text(stored.text).font(.callout).textSelection(.enabled)
+        @Bindable var editor = model
+        Hint(model.value.eventDate.map(displayDate) ?? stored.recordedAt.formatted(date: .abbreviated, time: .omitted))
+        InlineEditableText(text: $editor.value.text, isEditing: model.isEditing, placeholder: "Photo note")
+            .font(.callout).accessibilityIdentifier("noteText")
         VStack(alignment: .leading, spacing: 0) {
             LabeledRow("Recorded") { Text(stored.recordedAt.formatted(date: .abbreviated, time: .shortened)).font(.callout) }
-            if let date = stored.eventDate {
-                LabeledRow("Event date") { Text(displayDate(date)).font(.callout) }
-                LabeledRow("Precision") { Text(stored.eventPrecision.rawValue.capitalized).font(.callout) }
+            if model.isEditing {
+                Toggle("Event has a date", isOn: Binding(get: { model.value.eventDate != nil }, set: { enabled in
+                    model.value.eventDate = enabled ? journalDate() : nil
+                    model.value.eventPrecision = enabled ? .exact : .unknown
+                })).switchRow()
+                if model.value.eventDate != nil {
+                    LabeledRow("Event date") {
+                        DatePicker("Event date", selection: Binding(get: { journalDay(model.value.eventDate ?? journalDate()) }, set: { model.value.eventDate = journalDate($0) }), displayedComponents: .date).labelsHidden()
+                    }
+                    Picker("Date precision", selection: $editor.value.eventPrecision) {
+                        Text("Exact").tag(EventPrecision.exact)
+                        Text("Approximate").tag(EventPrecision.approximate)
+                    }.pickerStyle(.segmented)
+                }
+                Toggle("Still going on", isOn: $editor.value.isOngoing).switchRow()
+            } else {
+                if let date = stored.eventDate {
+                    LabeledRow("Event date") { Text(displayDate(date)).font(.callout) }
+                    LabeledRow("Precision") { Text(stored.eventPrecision.rawValue.capitalized).font(.callout) }
+                }
+                LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
             }
-            LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
         }.padding(.top, 8)
+        if model.conflict {
+            Button("Reload stored note") { Task { await model.load(app) } }.buttonStyle(.secondary)
+            if stored.revision != model.value.baseRevision {
+                Button("Keep both") { model.keepMine(both: true) }.buttonStyle(.secondary)
+                Button("Use my text") { model.keepMine() }.buttonStyle(.secondary)
+                Button("Use stored note") { model.useStored() }.buttonStyle(.secondary)
+            }
+        }
+        if model.missing { Button("Save as a new note") { Task { await model.saveAsNew(app) } }.buttonStyle(.secondary) }
     }
     // AI use is the note page's last section (Re-Design list, AI use), with the controls the More fold had: the switch while editing, its state while reading.
     @ViewBuilder private var aiUseBlock: some View {
@@ -284,9 +309,6 @@ struct NoteEditorView: View {
     private func close() {
         guard !model.isSending, !model.isAddingPhotos else { return }
         if model.hasChanges { confirmingClose = true } else { dismiss() }
-    }
-    private func cancel() {
-        if model.stored != nil { model.useStored() } else { close() }
     }
     private func save(close: Bool = false) async {
         writingText = false
