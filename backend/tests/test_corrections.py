@@ -99,7 +99,9 @@ async def test_a_tag_correction_resets_its_pattern_membership_and_reindexes(clie
     response = await correct(client, headers, first, category='object', original_text='the lake', text='The frozen lake')
     assert response.status_code == 200
     assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_memberships WHERE dream_id=?', (first,))
-    assert tuple((await db.rwdb.execute_fetchall('SELECT label,description,explanation FROM pattern_groups WHERE id=?', (group_id,)))[0]) == (None, None, None)
+    # The group keeps its name and description for the member that remains; only the explanation goes until the refresh (6 November 2026).
+    group = (await db.rwdb.execute_fetchall('SELECT label,description,explanation,evidence_key FROM pattern_groups WHERE id=?', (group_id,)))[0]
+    assert group['label'] and group['description'] and group['explanation'] is None and group['evidence_key'] is None
     assert [row['status'] for row in await tasks_of('refresh_findings', user=user)][-1] == 'waiting'
     assert [row['request_key'] for row in await tasks_of('index_dream', first)][-1] == f'index_dream:{first}:1:2:test-embedding-model:768'
     await run_all()
