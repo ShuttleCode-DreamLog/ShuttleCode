@@ -4,23 +4,15 @@ import UIKit
 // The prototype's header: a left-aligned serif title between the page's leading and trailing controls, on paper with a hairline.
 struct Header<Leading: View, Trailing: View>: View {
     let title: String
-    let onTitle: (() -> Void)?
     let leading: Leading
     let trailing: Trailing
-    init(_ title: String, onTitle: (() -> Void)? = nil, @ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
-        self.title = title; self.onTitle = onTitle; self.leading = leading(); self.trailing = trailing()
+    init(_ title: String, @ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title; self.leading = leading(); self.trailing = trailing()
     }
     var body: some View {
         HStack(spacing: 12) {
             leading
-            if let onTitle {
-                Button(action: onTitle) {
-                    HStack(spacing: 6) {
-                        titleText
-                        Image(systemName: "pencil").font(.callout).foregroundStyle(Color.muted)
-                    }
-                }.buttonStyle(.plain).accessibilityIdentifier("dreamTitle")
-            } else { titleText }
+            Text(title).font(.system(size: 29, design: .serif)).foregroundStyle(Color.ink).lineLimit(1).minimumScaleFactor(0.6)
             Spacer(minLength: 0)
             trailing
         }
@@ -29,14 +21,11 @@ struct Header<Leading: View, Trailing: View>: View {
         .background(Color.paper.ignoresSafeArea(edges: .top))
         .overlay(alignment: .bottom) { Rectangle().fill(Color.line).frame(height: 1) }
     }
-    private var titleText: some View {
-        Text(title).font(.system(size: 29, design: .serif)).foregroundStyle(Color.ink).lineLimit(1).minimumScaleFactor(0.6)
-    }
 }
 
 extension Header where Leading == EmptyView {
-    init(_ title: String, onTitle: (() -> Void)? = nil, @ViewBuilder trailing: () -> Trailing) {
-        self.init(title, onTitle: onTitle, leading: { EmptyView() }, trailing: trailing)
+    init(_ title: String, @ViewBuilder trailing: () -> Trailing) {
+        self.init(title, leading: { EmptyView() }, trailing: trailing)
     }
 }
 extension Header where Leading == EmptyView, Trailing == EmptyView {
@@ -81,18 +70,20 @@ extension View {
     func page(_ header: some View, aboveBar: Bool = true) -> some View { modifier(Page(header: header, aboveBar: aboveBar)) }
 }
 
-// The prototype's bottom bar: four screens and the + that opens the dream editor.
+// The prototype's bottom bar: four screens and the + that opens the dream editor, or the note editor on Life notes.
+// Patterns' + reads Add pattern and still opens the dream editor.
 struct BottomBar: View {
     @Environment(AppModel.self) private var app
     var body: some View {
+        let addsNote = app.tab == .notes && !app.showingHome
         HStack(alignment: .top, spacing: 0) {
             item("Journal", "list.bullet.rectangle.portrait", .journal)
             item("Pattern", "lightbulb", .patterns)
-            Button { app.newDream = EntryRoute(id: newID()) } label: {
+            Button { if addsNote { app.newNote = EntryRoute(id: newID()) } else { app.newDream = EntryRoute(id: newID()) } } label: {
                 VStack(spacing: 4) {
                     Image(systemName: "plus").font(.system(size: 22, weight: .medium)).foregroundStyle(.white)
                         .frame(width: 42, height: 32).background(Color.sage, in: RoundedRectangle(cornerRadius: 12))
-                    Text("Add dream").font(.caption2).foregroundStyle(Color.muted)
+                    Text(addLabel).font(.caption2).foregroundStyle(Color.muted)
                 }.frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain).accessibilityIdentifier("tab_add")
@@ -103,6 +94,16 @@ struct BottomBar: View {
         .background(Color.paper.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { Rectangle().fill(Color.line).frame(height: 1) }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { app.barHeight = $0 }
+    }
+    // Life notes' + adds a note. Pattern's opens the dream editor too: patterns are found in dreams and cannot be made by hand.
+    // Settings and Home keep the core action rather than the last tab's, which the screen would not show.
+    private var addLabel: String {
+        guard !app.showingHome else { return "Add dream" }
+        return switch app.tab {
+        case .notes: "Add life note"
+        case .patterns: "Add pattern"
+        case .journal, .settings: "Add dream"
+        }
     }
     private func item(_ title: String, _ icon: String, _ tab: AppTab) -> some View {
         let active = app.tab == tab && !app.showingHome

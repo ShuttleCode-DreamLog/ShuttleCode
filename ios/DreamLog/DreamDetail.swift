@@ -81,7 +81,8 @@ let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, titl
 let historyOffLine = "Turning this off removes the parts of analyses that cite it and starts the discussions that used it afresh. Turning it on again does not bring them back."
 let correctionLine = "A correction marks the analysis as outdated and starts the discussion afresh."
 
-// The prototype's dream page: date and Delete, tags, Original text, Summary, Analysis; the sources and AI switches follow below.
+// The prototype's dream page: date and Edit, tags, Original text, Summary, Analysis; the sources and AI switches follow below,
+// then Delete Dream. Edit and Delete sit as on a life note, and Edit opens the title and text together.
 struct DreamDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -111,13 +112,12 @@ struct DreamDetailView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Hint(displayDate(dream.dreamDate) + (model.draft?.unsent == true ? " · Waiting to sync" : ""))
                         Spacer()
-                        Button("Delete Dream", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet)
+                        Button("Edit", systemImage: "pencil") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
                     }
                     tagsBlock(dream)
                     Heading("Original text")
                     Text(dream.text).font(.callout).textSelection(.enabled)
                     if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
-                    Button("Edit text") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
                     Heading("Summary")
                     organizationBlock(dream)
                     Heading("Analysis")
@@ -133,6 +133,7 @@ struct DreamDetailView: View {
                             permissionsBlock(dream)
                         }
                     }.font(.callout).padding(.top, 14)
+                    Button("Delete Dream", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet).padding(.top, 8)
                 } else if model.isLoading { ProgressView("Loading dream…") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

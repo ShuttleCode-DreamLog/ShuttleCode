@@ -7,8 +7,8 @@ struct NotesView: View {
     @Environment(AppModel.self) private var app
     @State private var model = NotesModel()
     @State private var path: [String] = []
-    @State private var creating: EntryRoute?
     var body: some View {
+        @Bindable var app = app
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 13) {
@@ -21,7 +21,7 @@ struct NotesView: View {
                         Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading)
                     }
                     if model.isLoading { ProgressView().frame(maxWidth: .infinity) }
-                    Button("Add note") { creating = EntryRoute(id: newID()) }.buttonStyle(.primaryWide).accessibilityIdentifier("addNote")
+                    Button("Add note") { app.newNote = EntryRoute(id: newID()) }.buttonStyle(.primaryWide).accessibilityIdentifier("addNote")
                     HistoryToggle().font(.callout).switchRow()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -30,13 +30,14 @@ struct NotesView: View {
             .dreamPage()
             .page(Header("Life notes") { HomeButton() })
             .navigationDestination(for: String.self) { NoteEditorView(id: $0) }
-            .sheet(item: $creating, onDismiss: { Task { await model.load(app) } }) { entry in
-                NavigationStack { NoteEditorView(id: entry.id, newEntry: true) }
-            }
             .task { await model.load(app) }
             .reloadable { await model.load(app) }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await model.load(app) } } }
             .onChange(of: app.refreshes) { Task { await model.load(app) } }
+        }
+        // On the stack, not its root page, so the bar's + also works while a note is open.
+        .sheet(item: $app.newNote, onDismiss: { Task { await model.load(app) } }) { entry in
+            NavigationStack { NoteEditorView(id: entry.id, newEntry: true) }
         }
     }
 }
@@ -130,7 +131,7 @@ struct NoteEditorView: View {
     }
     @ViewBuilder private var editingBlock: some View {
         @Bindable var editor = model
-        TextField("Title (optional)", text: $editor.value.title).font(.heading).accessibilityIdentifier("noteTitle")
+        TextField("Title (optional)", text: $editor.value.title).font(.heading).field().accessibilityIdentifier("noteTitle")
         Toggle("Event has a date", isOn: Binding(get: { model.value.eventDate != nil }, set: { enabled in
             model.value.eventDate = enabled ? journalDate() : nil
             model.value.eventPrecision = enabled ? .exact : .unknown
@@ -181,7 +182,7 @@ struct NoteEditorView: View {
         HStack(alignment: .firstTextBaseline) {
             Hint(stored.eventDate.map(displayDate) ?? stored.recordedAt.formatted(date: .abbreviated, time: .omitted))
             Spacer()
-            Button("Edit") { model.isEditing = true }.buttonStyle(.secondary)
+            Button("Edit", systemImage: "pencil") { model.isEditing = true }.buttonStyle(.secondary)
         }
         Text(stored.text).font(.callout).textSelection(.enabled)
         DisclosureGroup("More", isExpanded: $showMore) {

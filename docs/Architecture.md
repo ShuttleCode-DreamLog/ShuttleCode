@@ -1,6 +1,6 @@
 # Collaborator entry point
 
-The app opens on Home and has a bottom bar with Journal, Pattern, Add dream (which opens the editor over the screen), Life notes and Settings, following the team's user-test prototype `DreamLog_User_Test.html` at the repo root (the header and bar in `Shell.swift`; colors, fonts and the shared card, field and button styles in `Theme.swift`). The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. The backend's task worker calls Gemini for the summary and tags (`organize`), the analysis (`analyze`) and pattern discovery (`index_dream`, `match_patterns`, `refresh_findings`).
+The app opens on Home and has a bottom bar with Journal, Pattern, Add dream (which opens the dream editor over the screen; on Life notes it reads Add life note and opens a new note; on Pattern it reads Add pattern and opens the dream editor), Life notes and Settings, following the team's user-test prototype `DreamLog_User_Test.html` at the repo root (the header and bar in `Shell.swift`; colors, fonts and the shared card, field and button styles in `Theme.swift`). The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. The backend's task worker calls Gemini for the summary and tags (`organize`), the analysis (`analyze`) and pattern discovery (`index_dream`, `match_patterns`, `refresh_findings`).
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
 | Patterns | `PatternsView` (finding cards; Garden is a `BubbleCluster` of the findings), `PatternDetailView` (rename, split, dismiss), `PatternsModel` | `/v1/patterns`, `/v1/patterns/groups/{id}/label`, `/dismiss`, `/split`, `patterns.py` (indexing, matching, findings), `providers.embed` | `dream_vectors`, `occurrences`, `pattern_*` tables (sqlite-vector) |
 | Notes | `NotesView`, `NoteEditorView`, `NotesModel`, `NoteEditorModel` | `/v1/memories` (with `title`), `memories.py`, `photos.py` | `memories` (`title` since version 6), `memory_photos`; unsent editor state in memory |
 | Profile | `ProfileSettings`, `ProfileModel` | `/v1/me/profile`, `profiles.py` | `profiles.fields_json` |
-| Settings and deletion | `Settings` (the Settings tab), `AppModel` (tab, `newDream` for the Add dream tab, `refreshes` on foreground, reconnection or editor close) | `/v1/me`, `records.py` | `users`; delete cascades profiles, notes and journals |
+| Settings and deletion | `Settings` (the Settings tab), `AppModel` (tab, `newDream` and `newNote` for the bar's +, `refreshes` on foreground, reconnection or editor close) | `/v1/me`, `records.py` | `users`; delete cascades profiles, notes and journals |
 | AI tasks | `TaskInfo` in `JournalModels.swift`, `failureText` (wiki 4.4.6 wording) in `AIModels.swift` | `/v1/tasks/{id}/retry`, `tasks.py` (worker), `records.py` (`charge`), `providers.py` | `tasks`, `usage` |
 | Shared infrastructure | `Identity`, `APIClient`, `PrivacyNotice`, `LocalStore` | `main.py`, `web.py`, `db.py`, `config.py` | Device-only Keychain, database schema |
 
