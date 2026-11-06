@@ -46,6 +46,28 @@ extension FoundationTests {
         #expect(paths == ["/v1/memories/\(id)", "/v1/memories/\(id)/photos/\(photoID)", "/v1/memories/\(id)", "/v1/memories/\(id)/photos/\(photoID)"])
         await closeJournalApp(app)
     }
+    @Test func noteSearchKeepsItsQueryThroughLoadMore() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let memory = try #require(JSONSerialization.jsonObject(with: memoryResponse(id: newID())) as? [String: Any])["memory"]!
+        let page = { (more: Bool) in try JSONSerialization.data(withJSONObject: ["items": [memory], "has_more": more, "ranked": true]) }
+        let model = NotesModel()
+        model.query = "exam week"
+        enqueue([(200, try page(true))])
+        await model.load(app)
+        enqueue([(200, try page(false))])
+        await model.load(app, more: true)
+        let requests = BackendProtocol.state.withLock { $0.requests }
+        #expect(requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" } == ["POST /v1/memories/search", "POST /v1/memories/search"])
+        #expect(requests.map { sentBody($0)?["query"] as? String } == ["exam week", "exam week"])
+        #expect(URLComponents(url: requests.last!.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "offset" }?.value == "1")
+        #expect(model.ranked)
+        await closeJournalApp(app)
+    }
+    @Test func dreamSectionOrderFallsBackForUnknownMissingAndRepeatedNames() {
+        #expect(dreamSections("") == DreamSection.allCases)
+        #expect(dreamSections("analysis,bogus,analysis,tags") == [.analysis, .tags, .originalText, .summary])
+    }
     func memoryResponse(id: String, text: String = "Sample life note.", revision: Int = 1) throws -> Data {
         let memory = Memory(id: id, text: text, recordedAt: .now, eventPrecision: .unknown, isOngoing: false, allowAnalysis: true, revision: revision, updatedAt: .now)
         let encoder = JSONEncoder()
