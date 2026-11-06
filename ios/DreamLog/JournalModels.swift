@@ -94,12 +94,11 @@ nonisolated struct Organization: Codable, Sendable {
     var status: OutputStatus
     var dreamRevision: Int
     var summary: String
-    var summaryCorrected: Bool
     var tags: [Tag]
     var createdAt: Date
 }
 
-nonisolated struct DreamCorrection: Encodable { var category: String; var originalText: String?; var text: String }
+nonisolated struct DreamCorrection: Encodable { var category: String; var originalText: String; var text: String }
 
 nonisolated enum ServerStatus: String, Codable, Sendable {
     case ready, processing, attention, unknown

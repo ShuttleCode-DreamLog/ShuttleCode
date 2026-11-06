@@ -64,10 +64,6 @@ final class AnalysisModel {
     }
 }
 
-nonisolated enum CorrectionTarget: Identifiable {
-    case summary, tag(Tag)
-    var id: String { if case let .tag(tag) = self { tag.id } else { "summary" } }
-}
 
 // The six switches (wiki 4.5.8); their explanatory lines are not shown, the privacy notice covers what each AI use sends.
 let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, title: String)] = [
@@ -112,7 +108,7 @@ struct DreamDetailView: View {
     @State private var confirmingKeepOut = false
     @State private var confirmingHistoryOff = false
     @State private var confirmingRefresh = false
-    @State private var correcting: CorrectionTarget?
+    @State private var renaming: Tag?
     @State private var correctionText = ""
     let id: String
 
@@ -180,6 +176,15 @@ struct DreamDetailView: View {
             .presentationDetents([.medium])
         }
         .task { await load() }
+        // While the summary and tags or the analysis are still being made on the server, the page waits and reads again, so the
+        // result appears by itself (wiki 4.4.6, rule 3); the wait ends with the page or the work.
+        .task(id: awaitingWork) {
+            var pause = 2
+            while awaitingWork, (try? await Task.sleep(for: .seconds(pause))) != nil {
+                await load()
+                pause = min(pause * 2, 15)
+            }
+        }
         .reloadable { await load() }
         .onChange(of: app.refreshes) { Task { await load() } }
         .confirmationDialog("Delete this dream? Deleting this dream also removes the analyses of other dreams and the discussion replies that were written with it.", isPresented: $confirmingDelete, titleVisibility: .visible) {
@@ -194,13 +199,16 @@ struct DreamDetailView: View {
         .confirmationDialog("A new analysis replaces this one and starts this dream's discussion afresh.\(allowance)", isPresented: $confirmingRefresh, titleVisibility: .visible) {
             Button("Update Analysis") { Task { await analysis.refresh(app) } }
         }
-        .alert(correctionTitle, isPresented: Binding(get: { correcting != nil }, set: { if !$0 { correcting = nil } }), presenting: correcting) { target in
+        .alert(renaming.map { "Rename “\($0.text)”" } ?? "", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }), presenting: renaming) { tag in
             TextField("New wording", text: $correctionText)
-            Button("Save") { Task { await saveCorrection(target) } }
+            Button("Save") { Task { await rename(tag) } }
             Button("Cancel", role: .cancel) {}
         } message: { _ in Text(correctionLine) }
     }
 
+    private var awaitingWork: Bool {
+        analysis.task?.inProgress == true || model.dream?.tasks.contains { $0.type == .organize && $0.inProgress } == true
+    }
     private func load() async {
         // An open editor owns this dream's draft until it closes.
         guard !editing else { return }
@@ -211,9 +219,6 @@ struct DreamDetailView: View {
     private var allowance: String {
         guard let text = app.me?.usage.first(where: { $0.kind == "text" }) else { return "" }
         return " About \(max(0, text.cap - text.used)) text generations are left today."
-    }
-    private var correctionTitle: String {
-        if case let .tag(tag) = correcting { "Rename “\(tag.text)”" } else { "Correct the summary" }
     }
 
     // Tags are pills; each opens its corrections, and a removed tag stays, struck through, until it is restored.
@@ -226,7 +231,7 @@ struct DreamDetailView: View {
                         Section("\(tag.category.rawValue.capitalized)\(tag.feeling == .inferred ? " · inferred" : "")\(tag.corrected ? " · your correction" : "") · “\(tag.excerpt)”") {
                             Button("Show dreams with this tag", systemImage: "line.3.horizontal.decrease") { app.showJournal(tag: tag.text) }
                             if editable {
-                                Button("Rename…", systemImage: "pencil") { correctionText = tag.text; correcting = .tag(tag) }
+                                Button("Rename…", systemImage: "pencil") { correctionText = tag.text; renaming = tag }
                                 if tag.corrected { Button("Restore “\(tag.originalText)”", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
                                 Button("Remove", systemImage: "minus.circle", role: .destructive) {
                                     Task { await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: "")) }
@@ -325,10 +330,6 @@ struct DreamDetailView: View {
             if let organization = dream.organization {
                 if organization.status != .current { Hint("Outdated after an edit") }
                 Text(organization.summary).font(.callout)
-                if organization.summaryCorrected { Hint("Your correction") }
-                if organization.status == .current {
-                    Button("Correct summary") { correctionText = organization.summary; correcting = .summary }.buttonStyle(.quiet)
-                }
             } else if organize == nil {
                 Hint(dream.permissions.analysis ? "No summary yet" : "Analysis is off")
             }
@@ -338,12 +339,9 @@ struct DreamDetailView: View {
     private func restore(_ tag: Tag) async {
         await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: tag.originalText))
     }
-    private func saveCorrection(_ target: CorrectionTarget) async {
+    private func rename(_ tag: Tag) async {
         let text = correctionText.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch target {
-        case .summary: if !text.isEmpty { await model.correct(app, DreamCorrection(category: "summary", text: text)) }
-        case let .tag(tag): await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: text))
-        }
+        await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: text))
     }
 
     // What the analysis presents follows the order of the wiki 4.6.7 table.

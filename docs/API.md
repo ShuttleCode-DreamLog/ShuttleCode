@@ -132,25 +132,24 @@ The worker claims at most three attempts per task, waiting 15 s and 60 s between
 When `organize` completes, `dream.organization` holds the result for the revision it was made from, and a dream the user left untitled takes the generated title (at most 48 characters) as its `title`, as metadata without a new revision; a title the user typed is never replaced, and the user can rename the dream afterwards as before:
 
 ```json
-{"status": "current", "dream_revision": 2, "summary": "A night walk by a blue lake.", "summary_corrected": false,
+{"status": "current", "dream_revision": 2, "summary": "A night walk by a blue lake.",
  "tags": [{"category": "place", "text": "blue lake", "original_text": "blue lake", "excerpt": "by the Blue Lake", "feeling": null, "corrected": false, "removed": false}],
  "created_at": 1760371200000}
 ```
 
-It is `null` until the first result. After a text edit it stays visible with `status` `outdated` until the new revision is organized; the journal `summary` is null meanwhile. `category` is `person`, `place`, `object`, `action`, `emotion` or `theme`; `feeling` is `stated` or `inferred` for an emotion and null otherwise. Every excerpt is a passage of the dream text as written, checked by the backend; items without a matching excerpt are dropped, labels are lower case, and at most 30 tags are kept. `corrected`, `removed` and `summary_corrected` reflect the user's corrections (below). Only the dream text is sent to Gemini, never the title, mood or notes, and the daily `text` limit counts each attempt.
+It is `null` until the first result. After a text edit it stays visible with `status` `outdated` until the new revision is organized; the journal `summary` is null meanwhile. `category` is `person`, `place`, `object`, `action`, `emotion` or `theme`; `feeling` is `stated` or `inferred` for an emotion and null otherwise. Every excerpt is a passage of the dream text as written, checked by the backend; items without a matching excerpt are dropped, labels are lower case, and at most 30 tags are kept. `corrected` and `removed` reflect the user's tag corrections (below); `summary` is always the generated one. Only the dream text is sent to Gemini, never the title, mood or notes, and the daily `text` limit counts each attempt.
 
-## Correcting the summary and tags
+## Correcting the tags
 
 `PUT /v1/dreams/{id}/corrections` changes what the current organization says, without changing the dream:
 
 ```json
 {"category": "person", "original_text": "teacher", "text": "my aunt"}
-{"category": "summary", "text": "My own summary."}
 ```
 
-`category` is `summary` or a tag category; a tag correction names the tag by its `original_text` (from `organization.tags`). `text` is the new wording, normalized like a tag (trimmed, lower case, single spaces); an empty `text` removes the tag, and sending the tag's original text, or the generated summary, takes the correction back. A rename to the present text of another tag of the same category removes the tag instead, so no tag appears twice. Repeating a request changes nothing. Success is 200 with `{"dream":{…}}`. 409 `invalid_state` without a current organization (none yet, or outdated after a text edit), 400 for an unknown category, a missing `original_text` or one that matches no tag, or an empty summary, 413 over 60 characters for a tag or 600 for a summary.
+`category` is a tag category; since 6 November 2026 the summary is only the generated one, so `summary` is refused with 400 and a summary correction stored earlier is ignored. The correction names the tag by its `original_text` (from `organization.tags`). `text` is the new wording, normalized like a tag (trimmed, lower case, single spaces); an empty `text` removes the tag, and sending the tag's original text takes the correction back. A rename to the present text of another tag of the same category removes the tag instead, so no tag appears twice. Repeating a request changes nothing. Success is 200 with `{"dream":{…}}`. 409 `invalid_state` without a current organization (none yet, or outdated after a text edit), 400 for an unknown category, a missing `original_text` or one that matches no tag, or an empty summary, 413 over 60 characters for a tag or 600 for a summary.
 
-Corrections are kept apart from the generated rows, so a retry or a new organization never overwrites them, and they are dropped with the organization when the dream's text changes. Each change raises the organization's revision, marks analyses that were given the description as outdated, and, for a tag, removes the tag from its pattern group (its texts are rewritten at the next refresh) and indexes and matches the dream again from the corrected text. A summary correction schedules no new work.
+Corrections are kept apart from the generated rows, so a retry or a new organization never overwrites them, and they are dropped with the organization when the dream's text changes. Each change raises the organization's revision, marks analyses that were given the description as outdated, and removes the tag from its pattern group (its texts are rewritten at the next refresh) and indexes and matches the dream again from the corrected text.
 
 ## Analysis
 

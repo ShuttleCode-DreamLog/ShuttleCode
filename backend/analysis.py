@@ -100,18 +100,13 @@ async def current_tags(connection, dream_ids):
     return rows
 
 
-async def effective_summary(connection, output_id, content):
-    rows = await connection.execute_fetchall("SELECT text FROM org_corrections WHERE output_id=? AND category='summary'", (output_id,))
-    return rows[0]['text'] if rows else msgspec.json.decode(content)['summary']
-
-
 async def select_context(connection, dream, use_history):
     sources = []
     organization = await connection.execute_fetchall("SELECT * FROM outputs WHERE dream_id=? AND type='organization' AND status='current'", (dream['id'],))
     tags = await current_tags(connection, [dream['id']])
     if organization and dream['allow_analysis']:
         feelings = {tag['tag_id']: f" ({tag['feeling']})" if tag['feeling'] else '' for tag in tags}
-        lines = [f"Summary: {await effective_summary(connection, organization[0]['id'], organization[0]['content'])}"] + [f"- {tag['category']}: {tag['text']}{feelings[tag['tag_id']]}; excerpt: {tag['excerpt']}" for tag in tags]
+        lines = [f"Summary: {msgspec.json.decode(organization[0]['content'])['summary']}"] + [f"- {tag['category']}: {tag['text']}{feelings[tag['tag_id']]}; excerpt: {tag['excerpt']}" for tag in tags]
         sources.append({'label': 'DESC', 'kind': 'output', 'source_id': organization[0]['id'], 'source_revision': organization[0]['revision'], 'source_date': None, 'cut_to': None, 'body': '\n'.join(lines)})
     if not use_history:
         return sources
@@ -138,7 +133,7 @@ async def select_context(connection, dream, use_history):
     for tag in await current_tags(connection, [candidate['id'] for candidate in candidates]):
         candidate_tags.setdefault(tag['dream_id'], set()).add(tag['text'])
     for output in await connection.execute_fetchall(f"SELECT id,dream_id,content FROM outputs WHERE type='organization' AND status='current' AND dream_id IN ({','.join('?' * len(candidates))})", tuple(candidate['id'] for candidate in candidates)) if candidates else []:
-        summaries[output['dream_id']] = await effective_summary(connection, output['id'], output['content'])
+        summaries[output['dream_id']] = msgspec.json.decode(output['content'])['summary']
     matched = []
     for candidate in candidates:
         score = sum(term in candidate_tags.get(candidate['id'], ()) or term_in(term, summaries.get(candidate['id'], '')) or term_in(term, candidate['text']) for term in terms)

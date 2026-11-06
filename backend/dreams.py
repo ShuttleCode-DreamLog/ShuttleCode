@@ -88,9 +88,8 @@ async def organization_value(identity, dream_id):
         return None
     output = outputs[0]
     corrections = {(row['category'], row['original_text']): row['text'] for row in await db.rwdb.execute_fetchall('SELECT category,original_text,text FROM org_corrections WHERE output_id=?', (output['id'],))}
-    summary = next((text for (category, _), text in corrections.items() if category == 'summary'), None)
     tags = await db.rwdb.execute_fetchall('SELECT category,text,excerpt,feeling FROM tags WHERE output_id=? ORDER BY rowid', (output['id'],))
-    return {'status': output['status'], 'dream_revision': output['dream_revision'], 'summary': summary or msgspec.json.decode(output['content'])['summary'], 'summary_corrected': summary is not None,
+    return {'status': output['status'], 'dream_revision': output['dream_revision'], 'summary': msgspec.json.decode(output['content'])['summary'],
             'tags': [tag_value(tag, corrections.get((tag['category'], tag['text']))) for tag in tags], 'created_at': output['created_at']}
 
 
@@ -100,8 +99,8 @@ async def dream_body(row):
 
 async def summaries(identity, dreams):
     ids = [row['id'] for row in dreams]
-    found = await db.rwdb.execute_fetchall(f"SELECT o.dream_id,o.content,c.text AS corrected FROM outputs o LEFT JOIN org_corrections c ON c.output_id=o.id AND c.category='summary' WHERE o.user_id=? AND o.type='organization' AND o.status='current' AND o.dream_id IN ({','.join('?' * len(ids))})", (identity, *ids)) if ids else []
-    return {row['dream_id']: row['corrected'] or msgspec.json.decode(row['content'])['summary'] for row in found}
+    found = await db.rwdb.execute_fetchall(f"SELECT o.dream_id,o.content FROM outputs o WHERE o.user_id=? AND o.type='organization' AND o.status='current' AND o.dream_id IN ({','.join('?' * len(ids))})", (identity, *ids)) if ids else []
+    return {row['dream_id']: msgspec.json.decode(row['content'])['summary'] for row in found}
 
 
 async def tag_lists(identity, dreams):
@@ -240,31 +239,28 @@ async def save_correction(request):
     identity = await resolve_user(request)
     dream_id = check_id(request.path_params['dream_id'])
     body = await read_body(request, Correction)
-    summary = body.category == 'summary'
-    if not summary and body.category not in config.TAG_CATEGORIES:
-        raise RequestError(400, 'invalid_request', 'Category must be summary or a tag category.')
-    if not summary and body.original_text is None:
+    # The summary is only ever the AI's (6 November 2026); a correction renames, removes or restores a tag.
+    if body.category not in config.TAG_CATEGORIES:
+        raise RequestError(400, 'invalid_request', 'Category must be a tag category.')
+    if body.original_text is None:
         raise RequestError(400, 'invalid_request', 'A tag correction names the tag in original_text.')
-    text = body.text.strip() if summary else normalized(body.text)
-    original = '' if summary else normalized(body.original_text)
-    if summary and not text:
-        raise RequestError(400, 'invalid_request', 'A summary cannot be empty.')
-    if len(text) > config.LIMITS['max_summary_chars' if summary else 'max_tag_chars']:
-        raise RequestError(413, 'too_large', 'Summary is too long.' if summary else 'Tag is too long.')
+    text = normalized(body.text)
+    original = normalized(body.original_text)
+    if len(text) > config.LIMITS['max_tag_chars']:
+        raise RequestError(413, 'too_large', 'Tag is too long.')
     async with db.tx() as connection:
         await owned_dream(identity, dream_id)
         outputs = await connection.execute_fetchall("SELECT * FROM outputs WHERE dream_id=? AND user_id=? AND type='organization'", (dream_id, identity))
         if not outputs or outputs[0]['status'] != 'current':
             raise RequestError(409, 'invalid_state', 'There is no current summary and tags to correct.')
         output = outputs[0]
-        tag = None if summary else next(iter(await connection.execute_fetchall('SELECT * FROM tags WHERE output_id=? AND category=? AND text=?', (output['id'], body.category, original))), None)
-        if not summary and tag is None:
+        tag = next(iter(await connection.execute_fetchall('SELECT * FROM tags WHERE output_id=? AND category=? AND text=?', (output['id'], body.category, original))), None)
+        if tag is None:
             raise RequestError(400, 'invalid_request', 'original_text matches no tag of this dream.')
         stored = await connection.execute_fetchall('SELECT text FROM org_corrections WHERE output_id=? AND category=? AND original_text=?', (output['id'], body.category, original))
-        generated = msgspec.json.decode(output['content'])['summary'] if summary else original
         # A tag never appears twice: renaming one to another tag's present text removes it instead (wiki 4.5.3, step 3).
-        duplicate = not summary and text and await connection.execute_fetchall('SELECT 1 FROM effective_tags WHERE output_id=? AND category=? AND text=? AND original_text<>?', (output['id'], body.category, text, original))
-        wanted = '' if duplicate else None if text == generated else text
+        duplicate = text and await connection.execute_fetchall('SELECT 1 FROM effective_tags WHERE output_id=? AND category=? AND text=? AND original_text<>?', (output['id'], body.category, text, original))
+        wanted = '' if duplicate else None if text == original else text
         changed = (stored[0]['text'] if stored else None) != wanted
         if changed:
             if wanted is None:
@@ -275,14 +271,13 @@ async def save_correction(request):
             # The raised revision is the description revision, so a corrected tag makes new indexing work rather than a repeat (wiki 4.3.3, note 3).
             await connection.execute('UPDATE outputs SET revision=revision+1 WHERE id=?', (output['id'],))
             await records.source_changed(connection, 'output', output['id'])
-            if tag is not None:
-                membership = await connection.execute_fetchall('SELECT group_id FROM pattern_memberships WHERE tag_id=?', (tag['id'],))
-                if membership:
-                    # The membership's comparison texts no longer describe the tag; matching decides afresh from the corrected text (wiki 4.5.3, step 6).
-                    await connection.execute('DELETE FROM pattern_memberships WHERE tag_id=?', (tag['id'],))
-                    await patterns.clear_group_texts(connection, membership[0]['group_id'])
-                    await patterns.schedule_refresh(connection, identity)
-                await records.schedule_processing(connection, dream_id)
+            membership = await connection.execute_fetchall('SELECT group_id FROM pattern_memberships WHERE tag_id=?', (tag['id'],))
+            if membership:
+                # The membership's comparison texts no longer describe the tag; matching decides afresh from the corrected text (wiki 4.5.3, step 6).
+                await connection.execute('DELETE FROM pattern_memberships WHERE tag_id=?', (tag['id'],))
+                await patterns.clear_group_texts(connection, membership[0]['group_id'])
+                await patterns.schedule_refresh(connection, identity)
+            await records.schedule_processing(connection, dream_id)
         value = await dream_body(await owned_dream(identity, dream_id))
     tasks.wake.set()
     return json_response({'dream': value})
