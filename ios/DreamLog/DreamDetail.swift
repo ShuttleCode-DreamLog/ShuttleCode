@@ -389,7 +389,8 @@ struct DreamDetailView: View {
 
     private func contextBlock(_ value: Analysis, dream: Dream) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(value.context) { entry in
+            // The dream and its own summary and tags are always used, so the list shows only the notes and earlier dreams (Re-Design list, 6 November 2026).
+            ForEach(value.context.filter { $0.label != "DREAM" && $0.kind != .output }) { entry in
                 switch (entry.available, entry.kind, entry.label) {
                 case (true, .memory, _): NavigationLink(value: Route.note(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
                 case (true, .dream, let label) where label != "DREAM": NavigationLink(value: Route.dream(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
