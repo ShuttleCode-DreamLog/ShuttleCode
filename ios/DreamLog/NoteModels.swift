@@ -100,8 +100,7 @@ final class NoteEditorModel {
     var pendingPhotos: [PendingPhoto] = []
     var photoContent: [String: Data] = [:]
     var isAddingPhotos = false
-    // `text` starts a new note from a message the user wrote in a discussion (Remember in profile, wiki 4.6.6, rule 2).
-    init(id: String, newEntry: Bool = false, text: String = "") { self.id = id; self.newEntry = newEntry; isEditing = newEntry; value.text = text }
+    init(id: String, newEntry: Bool = false) { self.id = id; self.newEntry = newEntry; isEditing = newEntry }
     private func current(_ app: AppModel) -> Bool { epoch == app.journalEpoch && app.noticeSeen && !app.deleting }
     var hasChanges: Bool {
         if !pendingPhotos.isEmpty { return true }

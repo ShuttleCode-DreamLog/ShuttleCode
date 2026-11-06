@@ -1,7 +1,7 @@
 import SwiftUI
 import Observation
 
-nonisolated enum Route: Hashable { case dream(String), note(String), draft(String), conversation(String, title: String) }
+nonisolated enum Route: Hashable { case dream(String), note(String), draft(String) }
 
 extension View {
     func routeDestinations() -> some View {
@@ -10,7 +10,6 @@ extension View {
             case let .dream(id): DreamDetailView(id: id)
             case let .note(id): NoteEditorView(id: id)
             case let .draft(id): DreamEditorView(id: id)
-            case let .conversation(id, title): DiscussionView(dreamId: id, title: title)
             }
         }
     }
@@ -307,15 +306,7 @@ struct DreamDetailView: View {
             Text(dream.text).font(.callout).textSelection(.enabled)
             if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
         case .summary: organizationBlock(dream)
-        case .analysis:
-            analysisBlock(dream)
-            // The discussion entry stays with the analysis it continues (wiki 4.6.6).
-            if !dream.permissions.discussion { Hint("Discussion is off") }
-            else if !dream.text.isEmpty {
-                NavigationLink(value: Route.conversation(id, title: dream.title ?? "Dream")) {
-                    Label("Conversation analysis", systemImage: "bubble.left.and.bubble.right")
-                }.buttonStyle(.primary).padding(.top, 8)
-            }
+        case .analysis: analysisBlock(dream)
         }
     }
 
