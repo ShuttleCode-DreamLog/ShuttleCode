@@ -325,7 +325,7 @@ async def analysis_value(connection, dream):
             excluded += 1
             continue
         available = target is not None and (row['kind'] == 'notes' or target['revision'] == row['source_revision'])
-        context.append({key: row[key] for key in ('label', 'kind', 'source_id', 'source_revision', 'source_date', 'cut_to')} | {'available': available})
+        context.append({key: row[key] for key in ('label', 'kind', 'source_id', 'source_revision', 'source_date', 'cut_to')} | {'available': available, 'title': target['title'] or None if row['kind'] == 'memory' and target is not None else None})
     return {'id': output['id'], 'status': output['status'], 'dream_revision': output['dream_revision'], 'sections': content['sections'], 'withheld': content['withheld'], 'context': context,
             'removed_sources': content.get('removed_sources', 0) + excluded, 'dream_date': content['dream_date'], 'mood': content['mood'], 'model': output['model'],
             'instruction_version': output['instruction_version'], 'created_at': output['created_at']}

@@ -159,7 +159,7 @@ async def test_analyze_saves_checked_sections_and_sources(client, clock, gemini)
     headers, user, dream_id = await journal(client, mood='anxious')
     desc = await organized(user, dream_id)
     clock['ms'] = NOON - 2 * DAY
-    memory_id = await note(client, headers, 'Exam deadline at the station office.', event_date='2026-10-08')
+    memory_id = await note(client, headers, 'Exam deadline at the station office.', event_date='2026-10-08', title='Exam week')
     _, _, earlier = await journal(client, text='A train stopped at a frozen lake.', headers=headers, dream_date='2026-09-30')
     clock['ms'] = NOON
     gemini.answers.append({'sections': [
@@ -190,6 +190,7 @@ async def test_analyze_saves_checked_sections_and_sources(client, clock, gemini)
     body = (await client.get(f'/v1/dreams/{dream_id}/analysis', headers=headers)).json()
     assert [entry['label'] for entry in body['analysis']['context']] == ['DREAM', 'D1', 'DESC', 'M1'] or [entry['label'] for entry in body['analysis']['context']] == ['DREAM', 'DESC', 'M1', 'D1']
     assert all(entry['available'] for entry in body['analysis']['context']) and body['task']['status'] == 'completed' and body['analysis']['removed_sources'] == 0
+    assert [entry['title'] for entry in body['analysis']['context'] if entry['kind'] == 'memory'] == ['Exam week']
     assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['status'] == 'ready'
 
 

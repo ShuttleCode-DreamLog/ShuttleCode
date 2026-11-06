@@ -34,6 +34,7 @@ nonisolated struct ContextEntry: Codable, Sendable, Identifiable {
     var sourceDate: String?
     var available: Bool
     var cutTo: Int?
+    var title: String?
     var id: String { label }
     // Labels are never shown to the user (wiki 4.6.7, analysis logic 4).
     var name: String {
@@ -43,7 +44,8 @@ nonisolated struct ContextEntry: Codable, Sendable, Identifiable {
         case (.dream, _): "Dream\(date)"
         case (.output, "ANALYSIS"): "This dream's analysis"
         case (.output, _): "This dream's summary and tags"
-        case (.memory, _): "Life note\(date)"
+        // A note is named by its title so untitled and undated notes are the only ones left as "Life note" (Re-Design list, 6 November 2026).
+        case (.memory, _): "\(title ?? "Life note")\(date)"
         case (.notes, _): "Your correction notes"
         case (.unknown, _): "Source"
         }
