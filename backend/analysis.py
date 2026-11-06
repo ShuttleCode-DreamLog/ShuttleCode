@@ -44,6 +44,10 @@ class AnalysisAnswer(msgspec.Struct):
     sections: list[Section]
 
 
+class NoteChoice(msgspec.Struct):
+    choice: str
+
+
 class RefreshBody(msgspec.Struct):
     refresh_id: str
 
@@ -119,9 +123,14 @@ async def select_context(connection, dream, use_history):
     zone = zone_of(user['timezone'])
     dream_day = date.fromisoformat(dream['dream_date'])
     terms = dream_terms([tag['text'] for tag in tags], dream['text'])
+    # Notes the user added skip the date and match rules because the user chose them; removed ones are never picked (Re-Design list, 6 November 2026).
+    added = await connection.execute_fetchall("SELECT m.*,c.opened_date FROM analysis_note_choices a JOIN memories m ON m.id=a.memory_id LEFT JOIN checkins c ON c.id=m.checkin_id WHERE a.dream_id=? AND a.choice='added' AND m.user_id=? AND m.allow_analysis=1 ORDER BY a.created_at,a.memory_id LIMIT ?", (dream['id'], dream['user_id'], config.MAX_ADDED_MEMORIES))
+    chosen = {row['memory_id'] for row in await connection.execute_fetchall('SELECT memory_id FROM analysis_note_choices WHERE dream_id=?', (dream['id'],))}
     memories = await connection.execute_fetchall('SELECT m.*,c.opened_date FROM memories m LEFT JOIN checkins c ON c.id=m.checkin_id WHERE m.user_id=? AND m.allow_analysis=1', (dream['user_id'],))
     scored = []
     for memory in memories:
+        if memory['id'] in chosen:
+            continue
         days = memory_days(memory, zone, date.fromisoformat(memory['opened_date']) if memory['opened_date'] else None)
         if days[0] > dream_day and not days[2]:
             continue
@@ -129,7 +138,7 @@ async def select_context(connection, dream, use_history):
             scored.append((memory, score))
     ongoing = sorted((memory for memory, _ in scored if memory['is_ongoing']), key=lambda memory: -memory['recorded_at'])
     others = [memory for memory, _ in sorted(((memory, score) for memory, score in scored if not memory['is_ongoing']), key=lambda pair: (-pair[1], -pair[0]['recorded_at']))]
-    for number, memory in enumerate((ongoing + others)[:config.MAX_CONTEXT_MEMORIES], 1):
+    for number, memory in enumerate([*added, *(ongoing + others)[:config.MAX_CONTEXT_MEMORIES]], 1):
         when = (f"Event date: {memory['event_date']} ({memory['event_precision']})" if memory['event_date'] else f"From a weekly check-in opened {memory['opened_date']}" if memory['opened_date'] else 'Event date unknown')
         body = '\n'.join([memory['text'], when, f"Recorded: {local_day(memory['recorded_at'], zone).isoformat()}"] + (['Ongoing'] if memory['is_ongoing'] else []))
         sources.append({'label': f'M{number}', 'kind': 'memory', 'source_id': memory['id'], 'source_revision': memory['revision'], 'source_date': memory['event_date'], 'cut_to': None, 'body': body})
@@ -222,6 +231,10 @@ async def notes_of(connection, dream_id):
     return await connection.execute_fetchall('SELECT id,note FROM discussion_corrections WHERE dream_id=? ORDER BY created_at,id', (dream_id,))
 
 
+async def choices_of(connection, dream_id):
+    return [tuple(row) for row in await connection.execute_fetchall('SELECT memory_id,choice FROM analysis_note_choices WHERE dream_id=? ORDER BY memory_id', (dream_id,))]
+
+
 async def unchanged(connection, dream, sent, use_history, sources, note_ids):
     current = await connection.execute_fetchall('SELECT use_history FROM users WHERE id=?', (dream['user_id'],))
     if (dream['mood'], dream['dream_date']) != sent or [row['id'] for row in await notes_of(connection, dream['id'])] != note_ids:
@@ -254,6 +267,7 @@ async def analyze(task):
         use_history = (await connection.execute_fetchall('SELECT use_history FROM users WHERE id=?', (dream['user_id'],)))[0]['use_history']
         sources = await select_context(connection, dream, use_history)
         notes = await notes_of(connection, dream['id'])
+        choices = await choices_of(connection, dream['id'])
     sent = (dream['mood'], dream['dream_date'])
     possible = possible_kinds(['DREAM'] + [source['label'] for source in sources])
     content, sentences, labels = build_content(dream, sources, [row['note'] for row in notes], possible)
@@ -279,7 +293,10 @@ async def analyze(task):
         if notes:
             rows.append(('NOTES', 'notes', dream['id'], dream['revision'], None, None))
         output = {'sections': [kept[kind] for kind in KINDS if kind in kept], 'withheld': withheld, 'removed_sources': 0, 'dream_date': sent[1], 'mood': sent[0]}
-        await records.save_output(connection, task['user_id'], dream['id'], 'analysis', dream['revision'], output, model, ANALYZE_VERSION, rows)
+        output_id = await records.save_output(connection, task['user_id'], dream['id'], 'analysis', dream['revision'], output, model, ANALYZE_VERSION, rows)
+        # A note added or removed while this ran waits for the next Update Analysis instead of failing and retrying, which would charge again (Re-Design list, 6 November 2026).
+        if use_history and await choices_of(connection, dream['id']) != choices:
+            await connection.execute("UPDATE outputs SET status='outdated' WHERE id=?", (output_id,))
         await tasks.complete(connection, task)
     return tasks.Done()
 
@@ -316,6 +333,7 @@ async def analysis_value(connection, dream):
     content = msgspec.json.decode(output['content'])
     context = [{'label': 'DREAM', 'kind': 'dream', 'source_id': dream['id'], 'source_revision': output['dream_revision'], 'source_date': content['dream_date'], 'available': dream['revision'] == output['dream_revision'], 'cut_to': None}]
     excluded = 0
+    choices = dict(await choices_of(connection, dream['id']))
     for row in await connection.execute_fetchall('SELECT * FROM sources WHERE output_id=? ORDER BY rowid', (output['id'],)):
         table = {'memory': 'memories', 'dream': 'dreams', 'output': 'outputs', 'notes': 'dreams'}[row['kind']]
         found = await connection.execute_fetchall(f'SELECT * FROM {table} WHERE id=?', (row['source_id'],))
@@ -325,8 +343,12 @@ async def analysis_value(connection, dream):
             excluded += 1
             continue
         available = target is not None and (row['kind'] == 'notes' or target['revision'] == row['source_revision'])
-        context.append({key: row[key] for key in ('label', 'kind', 'source_id', 'source_revision', 'source_date', 'cut_to')} | {'available': available, 'title': target['title'] or None if row['kind'] == 'memory' and target is not None else None})
-    return {'id': output['id'], 'status': output['status'], 'dream_revision': output['dream_revision'], 'sections': content['sections'], 'withheld': content['withheld'], 'context': context,
+        context.append({key: row[key] for key in ('label', 'kind', 'source_id', 'source_revision', 'source_date', 'cut_to')} | {'available': available, 'title': target['title'] or None if row['kind'] == 'memory' and target is not None else None,
+                                                                                                                   'choice': choices.get(row['source_id']) if row['kind'] == 'memory' else None})
+    used = {entry['source_id'] for entry in context}
+    history = (await connection.execute_fetchall('SELECT use_history FROM users WHERE id=?', (dream['user_id'],)))[0]['use_history']
+    pending = [{'source_id': row['id'], 'title': row['title'] or None, 'source_date': row['event_date']} for row in await added_notes(connection, dream) if row['id'] not in used] if history else []
+    return {'id': output['id'], 'status': output['status'], 'dream_revision': output['dream_revision'], 'sections': content['sections'], 'withheld': content['withheld'], 'context': context, 'pending_notes': pending,
             'removed_sources': content.get('removed_sources', 0) + excluded, 'dream_date': content['dream_date'], 'mood': content['mood'], 'model': output['model'],
             'instruction_version': output['instruction_version'], 'created_at': output['created_at']}
 
@@ -364,6 +386,39 @@ async def refresh_analysis(request):
             created = (await connection.execute_fetchall('SELECT * FROM tasks WHERE request_key=?', (key,)))[0]
     tasks.wake.set()
     return json_response({'task': tasks.task_value(existing or created)}, 200 if existing else 202)
+
+
+async def added_notes(connection, dream):
+    return await connection.execute_fetchall("SELECT m.* FROM analysis_note_choices a JOIN memories m ON m.id=a.memory_id WHERE a.dream_id=? AND a.choice='added' AND m.user_id=? AND m.allow_analysis=1 ORDER BY a.created_at,a.memory_id", (dream['id'], dream['user_id']))
+
+
+async def choose_note(request):
+    identity = await resolve_user(request)
+    dream_id, memory_id = check_id(request.path_params['dream_id']), check_id(request.path_params['memory_id'])
+    choice = (await read_body(request, NoteChoice)).choice if request.method == 'PUT' else None
+    if request.method == 'PUT' and choice not in ('added', 'removed'):
+        raise RequestError(400, 'invalid_request', 'Choice must be added or removed.')
+    async with db.tx() as connection:
+        dream = await owned(connection, identity, dream_id)
+        if not dream['allow_analysis']:
+            raise RequestError(403, 'not_permitted', 'Analysis is turned off for this dream.')
+        notes = await connection.execute_fetchall('SELECT allow_analysis FROM memories WHERE id=? AND user_id=?', (memory_id, identity))
+        if not notes:
+            raise RequestError(404, 'not_found', 'Life note not found.')
+        before = dict(await choices_of(connection, dream_id)).get(memory_id)
+        if choice == 'added' and before != 'added':
+            if not notes[0]['allow_analysis']:
+                raise RequestError(409, 'not_permitted', 'This note is kept out of AI processing.')
+            if len(await added_notes(connection, dream)) >= config.MAX_ADDED_MEMORIES:
+                raise RequestError(409, 'too_many', f'Up to {config.MAX_ADDED_MEMORIES} notes can be added.')
+        if choice is None:
+            await connection.execute('DELETE FROM analysis_note_choices WHERE dream_id=? AND memory_id=?', (dream_id, memory_id))
+        else:
+            await connection.execute('INSERT INTO analysis_note_choices(dream_id,memory_id,user_id,choice,created_at) VALUES(?,?,?,?,?) ON CONFLICT(dream_id,memory_id) DO UPDATE SET choice=excluded.choice,created_at=excluded.created_at WHERE choice<>excluded.choice', (dream_id, memory_id, identity, choice, config.now()))
+        # A changed choice takes effect on the next Update Analysis, so it only marks the analysis out of date (Re-Design list, 6 November 2026).
+        if choice != before:
+            await connection.execute("UPDATE outputs SET status='outdated' WHERE dream_id=? AND type='analysis'", (dream_id,))
+        return json_response({'analysis': await analysis_value(connection, dream), 'task': await analysis_task(connection, dream)})
 
 
 tasks.handlers['analyze'] = analyze

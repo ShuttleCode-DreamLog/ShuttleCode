@@ -50,6 +50,18 @@ final class AnalysisModel {
         case let .failure(failure): error = failure.code == "cap_reached" || failure.code == "ceiling_reached" ? failureText(failure.code, .analyze) : failure.message
         }
     }
+    func choose(_ app: AppModel, memory: String, choice: String?) async {
+        guard !isSending, let client = app.client else { return }
+        if epoch == nil { epoch = app.journalEpoch }
+        isSending = true; changes += 1
+        defer { isSending = false }
+        let result = await client.chooseAnalysisNote(dreamId, memoryID: memory, choice: choice)
+        guard current(app) else { return }
+        switch result {
+        case let .success(value): analysis = value.analysis; task = value.task; error = nil
+        case let .failure(failure): error = failure.message
+        }
+    }
     func retry(_ app: AppModel) async {
         guard !isSending, let failed = task, let client = app.client else { return }
         if epoch == nil { epoch = app.journalEpoch }
@@ -104,6 +116,7 @@ struct DreamDetailView: View {
     @State private var editing = false
     @State private var showSwitches = false
     @State private var showingSources = false
+    @State private var pickingNote = false
     @State private var arranging = false
     @State private var collapsed: Set<String> = []
     @AppStorage(dreamSectionOrderKey) private var sectionOrder = ""
@@ -158,6 +171,11 @@ struct DreamDetailView: View {
                 .dreamPage()
                 .page(Header("Information used", leading: { BackButton(label: "Done") { showingSources = false } }, trailing: { EmptyView() }), aboveBar: false)
                 .routeDestinations()
+                .sheet(isPresented: $pickingNote) {
+                    NavigationStack {
+                        NotePickerView(excluded: listedNotes) { memory in Task { await analysis.choose(app, memory: memory, choice: "added") } }
+                    }
+                }
             }
         }
         .sheet(isPresented: $arranging) {
@@ -252,7 +270,7 @@ struct DreamDetailView: View {
                 foldHeading(section.title, key: section.rawValue)
                 Spacer()
                 if let value = analysis.analysis {
-                    Button("Supporting life notes (\(value.context.count { $0.kind == .memory })) ›") { showingSources = true }
+                    Button("Supporting life notes (\(value.context.count { $0.kind == .memory } + (value.pendingNotes?.count ?? 0))) ›") { showingSources = true }
                         .buttonStyle(.quiet).accessibilityIdentifier("analysisSources")
                 }
             }
@@ -391,11 +409,35 @@ struct DreamDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             // The dream and its own summary and tags are always used, so the list shows only the notes and earlier dreams (Re-Design list, 6 November 2026).
             ForEach(value.context.filter { $0.label != "DREAM" && $0.kind != .output }) { entry in
-                switch (entry.available, entry.kind, entry.label) {
-                case (true, .memory, _): NavigationLink(value: Route.note(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
-                case (true, .dream, let label) where label != "DREAM": NavigationLink(value: Route.dream(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
-                default: contextRow(entry, link: false)
+                HStack {
+                    switch (entry.available, entry.kind, entry.label) {
+                    case (true, .memory, _): NavigationLink(value: Route.note(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
+                    case (true, .dream, let label) where label != "DREAM": NavigationLink(value: Route.dream(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
+                    default: contextRow(entry, link: false)
+                    }
+                    // Every note can be taken out, whether it was added or picked automatically; it leaves on the next Update Analysis (Re-Design list, 6 November 2026).
+                    if entry.kind == .memory && entry.choice == "removed" {
+                        Button("Undo") { choose(entry.sourceId, nil) }.buttonStyle(.quiet).disabled(analysis.isSending)
+                    } else if entry.kind == .memory {
+                        removeButton(entry.sourceId, name: entry.name)
+                    }
                 }
+            }
+            ForEach(value.pendingNotes ?? []) { pending in
+                HStack {
+                    NavigationLink(value: Route.note(pending.sourceId)) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) { Text(pending.name).font(.callout); Hint("Added · used after Update Analysis") }
+                            Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(Color.muted)
+                        }
+                    }.buttonStyle(.plain)
+                    removeButton(pending.sourceId, name: pending.name)
+                }
+            }
+            if let error = analysis.error { Hint(error) }
+            if app.me?.useHistory == true {
+                Button("+ Add life note") { pickingNote = true }
+                    .buttonStyle(.quiet).disabled(analysis.isSending || addedCount(value) >= 4).accessibilityIdentifier("addAnalysisNote")
             }
             if value.removedSources > 0 { Hint("\(value.removedSources) source(s) since deleted or excluded") }
             if value.dreamDate != dream.dreamDate || value.mood != dream.mood {
@@ -403,10 +445,21 @@ struct DreamDetailView: View {
             }
         }.padding(.top, 8)
     }
+    private func removeButton(_ memory: String, name: String) -> some View {
+        Button { choose(memory, "removed") } label: { Image(systemName: "minus.circle").foregroundStyle(Color.muted) }
+            .buttonStyle(.plain).disabled(analysis.isSending).accessibilityLabel("Remove \(name)")
+    }
+    private func choose(_ memory: String, _ choice: String?) { Task { await analysis.choose(app, memory: memory, choice: choice) } }
+    private func addedCount(_ value: Analysis) -> Int { value.context.count { $0.choice == "added" } + (value.pendingNotes?.count ?? 0) }
+    private var listedNotes: Set<String> {
+        guard let value = analysis.analysis else { return [] }
+        return Set(value.context.filter { $0.kind == .memory && $0.choice != "removed" }.map(\.sourceId) + (value.pendingNotes ?? []).map(\.sourceId))
+    }
     private func contextRow(_ entry: ContextEntry, link: Bool) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name).font(.callout)
+                if entry.choice == "removed" { Hint("Removed · leaves after Update Analysis") }
                 if !entry.available { Hint("Changed since this analysis") }
                 if let cut = entry.cutTo { Hint("First \(cut) characters") }
             }

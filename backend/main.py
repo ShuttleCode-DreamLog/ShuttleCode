@@ -109,6 +109,7 @@ routes.extend([
     Route("/v1/dreams/{dream_id}/corrections", save_correction, methods=["PUT"]),
     Route("/v1/dreams/{dream_id}/analysis", analysis.get_analysis, methods=["GET"]),
     Route("/v1/dreams/{dream_id}/analysis/refresh", analysis.refresh_analysis, methods=["POST"]),
+    Route("/v1/dreams/{dream_id}/analysis/notes/{memory_id}", analysis.choose_note, methods=["PUT", "DELETE"]),
     Route("/v1/patterns", patterns.get_patterns, methods=["GET"]),
     Route("/v1/patterns/groups/{group_id}/label", patterns.label_group, methods=["PUT"]),
     Route("/v1/patterns/groups/{group_id}/dismiss", patterns.dismiss_group, methods=["POST"]),
