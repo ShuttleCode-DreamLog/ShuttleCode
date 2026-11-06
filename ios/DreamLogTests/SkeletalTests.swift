@@ -68,13 +68,13 @@ extension FoundationTests {
           "withheld": 1,
           "context": [{"label": "DREAM", "kind": "dream", "source_id": "9f1e", "source_revision": 2, "source_date": "2026-10-15", "available": true, "cut_to": null},
                       {"label": "DESC", "kind": "output", "source_id": "o1", "source_revision": 1, "source_date": null, "available": false, "cut_to": null},
-                      {"label": "M1", "kind": "memory", "source_id": "77aa", "source_revision": 1, "source_date": "2026-10-13", "available": true, "cut_to": 200}],
+                      {"label": "M1", "kind": "memory", "source_id": "77aa", "source_revision": 1, "source_date": "2026-10-13", "available": true, "cut_to": 200, "title": "Exam week"}],
           "removed_sources": 1, "dream_date": "2026-10-15", "mood": null, "model": "test-model", "instruction_version": "analyze-1", "created_at": 1760371200000},
          "task": null}
         """.utf8)
         let read = try serverDecoder().decode(AnalysisResponse.self, from: analysis)
         let result = try #require(read.analysis)
-        let note = "Life note · \(displayDate("2026-10-13"))"
+        let note = "Exam week · \(displayDate("2026-10-13"))"
         #expect(result.context.map(\.name) == ["This dream", "This dream's summary and tags", note])
         #expect(result.text(of: result.sections[0]) == "The deadline \(note) may echo the rush.")
         #expect(result.sources(of: result.sections[0]) == ["This dream", note])

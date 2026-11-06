@@ -59,6 +59,44 @@ struct NotesView: View {
     }
 }
 
+// Picks a note to add to a dream's analysis; notes already listed and notes kept out of AI processing are left out (Re-Design list, 6 November 2026).
+struct NotePickerView: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let excluded: Set<String>
+    let pick: (String) -> Void
+    @State private var model = NotesModel()
+    @State private var query = ""
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 13) {
+                TextField("Search notes…", text: $query).field().submitLabel(.search).onSubmit(search).accessibilityIdentifier("pickerSearch")
+                if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
+                let notes = model.items.filter { $0.allowAnalysis && !excluded.contains($0.id) }
+                if notes.isEmpty && !model.isLoading { EmptyCard(model.query.isEmpty ? "No other notes to add" : "No recorded note matches") }
+                ForEach(notes) { note in Button { pick(note.id); dismiss() } label: { NoteCard(note: note) }.buttonStyle(.plain) }
+                if model.hasMore {
+                    Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading)
+                }
+                if model.isLoading { ProgressView().frame(maxWidth: .infinity) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .dreamPage()
+        .page(Header("Add life note", leading: { BackButton(label: "Done") { dismiss() } }, trailing: { EmptyView() }), aboveBar: false)
+        .task { await model.load(app) }
+        .onChange(of: query) { _, value in
+            if value.isEmpty && !model.query.isEmpty { model.query = ""; Task { await model.load(app) } }
+        }
+    }
+    private func search() {
+        guard !model.isLoading else { return }
+        model.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { await model.load(app) }
+    }
+}
+
 struct NoteCard: View {
     let note: Memory
     var body: some View {

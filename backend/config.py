@@ -19,6 +19,8 @@ PROVIDER_TIMEOUT_SECONDS = 120
 MAX_TAGS = 30
 TAG_CATEGORIES = ("person", "place", "object", "action", "emotion", "theme")
 MAX_CONTEXT_MEMORIES = 4
+# Notes the user adds by hand come on top of the automatic pick, with their own limit (Re-Design list, 6 November 2026).
+MAX_ADDED_MEMORIES = 4
 MEMORY_WINDOW_DAYS = 30
 MIN_DREAM_MATCHES = 2
 MAX_CONTEXT_DREAMS = 3
