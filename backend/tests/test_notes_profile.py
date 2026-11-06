@@ -4,7 +4,9 @@ from uuid import uuid4
 
 import pytest
 import db
+import providers
 from test_foundation import client, credential
+from test_patterns import ai
 
 
 def note(text='Invented life note: preparing for exams.', **fields):
@@ -125,18 +127,42 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
         await upgraded.close()
 
 
-async def test_notes_search_matches_title_or_text_literally(client):
+async def test_notes_search_ranks_by_meaning_and_embeds_missing_notes_once(client, ai):
+    headers, ids = credential(), {}
+    for key, title, text in (('lake', 'Weekend', 'Invented: a walk by the lake.'), ('exam', 'Exam week', 'Invented: library until late.'), ('private', None, 'Invented: lake cabin, kept private.')):
+        ids[key] = str(uuid4())
+        await client.put(f'/v1/memories/{ids[key]}', headers=headers, json=note(text, title=title, allow_analysis=key != 'private'))
+    search = lambda query, **fields: client.post('/v1/memories/search', headers=headers, json={'query': query, **fields})
+    found = (await search('lake')).json()
+    # The lake note by meaning first; the private note has no vector and follows because it carries the word; the exam note is too far.
+    assert found['ranked'] and [(item['id'], item['similarity'] is not None) for item in found['items']] == [(ids['lake'], True), (ids['private'], False)]
+    assert ai.embeds[0] == ['lake'] and sorted(ai.embeds[1]) == sorted(['Weekend\nInvented: a walk by the lake.', 'Exam week\nInvented: library until late.'])
+    assert all('private' not in text for texts in ai.embeds for text in texts)
+    await search('exam')
+    assert ai.embeds[2:] == [['exam']]
+    await client.put(f"/v1/memories/{ids['exam']}", headers=headers, json=note('Invented: exam at the lake.', base_revision=1, title='Exam week'))
+    await search('lake')
+    assert ai.embeds[4] == ['Exam week\nInvented: exam at the lake.']
+    assert (await client.post('/v1/memories/search?offset=1&limit=1', headers=headers, json={'query': 'lake'})).json()['has_more']
+    assert ai.embeds[5:] == [['lake']]
+    await client.put(f"/v1/memories/{ids['lake']}", headers=headers, json=note('Invented: a walk by the lake.', base_revision=1, title='Weekend', allow_analysis=False))
+    assert (await db.rwdb.execute_fetchall('SELECT memory_id FROM memory_vectors WHERE memory_id=?', (ids['lake'],))) == []
+    assert (await search('quiet lake', ongoing=True)).json()['items'] == []
+
+
+async def test_notes_search_falls_back_to_literal_title_or_text(client, ai):
     headers, other = credential(), credential()
+    ai.fail_embed = providers.ProviderError('network', True)
     for title, text in (('Exam week', 'Invented: library until late.'), (None, 'Invented: 50% sure_of it \\ done.'), ('Trip', 'Invented: train to the coast.')):
         await client.put(f'/v1/memories/{uuid4()}', headers=headers, json=note(text, title=title))
     await client.put(f'/v1/memories/{uuid4()}', headers=other, json=note('Invented: exam elsewhere.'))
-    found = lambda query: client.get('/v1/memories', headers=headers, params={'q': query})
-    assert [item['title'] for item in (await found('EXAM')).json()['items']] == ['Exam week']
+    found = lambda query: client.post('/v1/memories/search', headers=headers, json={'query': query})
+    literal = (await found('EXAM')).json()
+    assert not literal['ranked'] and [(item['title'], item['similarity']) for item in literal['items']] == [('Exam week', None)]
     assert [item['title'] for item in (await found('coast')).json()['items']] == ['Trip']
-    for literal in ('%', '_', '\\'):
-        assert len((await found(literal)).json()['items']) == 1
+    for text in ('%', '_', '\\'):
+        assert len((await found(text)).json()['items']) == 1
     assert len((await found('   ')).json()['items']) == 3
-    assert (await client.get('/v1/memories', headers=headers, params={'q': 'Exam', 'ongoing': 'true'})).json()['items'] == []
     assert (await found('x' * 5000)).status_code == 413
 
 

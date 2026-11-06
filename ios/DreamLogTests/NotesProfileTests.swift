@@ -50,16 +50,18 @@ extension FoundationTests {
         let (app, identity, defaults, namespace) = try await journalApp()
         defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
         let memory = try #require(JSONSerialization.jsonObject(with: memoryResponse(id: newID())) as? [String: Any])["memory"]!
-        let page = { (more: Bool) in try JSONSerialization.data(withJSONObject: ["items": [memory], "has_more": more]) }
+        let page = { (more: Bool) in try JSONSerialization.data(withJSONObject: ["items": [memory], "has_more": more, "ranked": true]) }
         let model = NotesModel()
         model.query = "exam week"
         enqueue([(200, try page(true))])
         await model.load(app)
         enqueue([(200, try page(false))])
         await model.load(app, more: true)
-        let queries = BackendProtocol.state.withLock { $0.requests.map { URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.queryItems ?? [] } }
-        #expect(queries.map { $0.first { $0.name == "q" }?.value } == ["exam week", "exam week"])
-        #expect(queries.last?.first { $0.name == "offset" }?.value == "1")
+        let requests = BackendProtocol.state.withLock { $0.requests }
+        #expect(requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" } == ["POST /v1/memories/search", "POST /v1/memories/search"])
+        #expect(requests.map { sentBody($0)?["query"] as? String } == ["exam week", "exam week"])
+        #expect(URLComponents(url: requests.last!.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "offset" }?.value == "1")
+        #expect(model.ranked)
         await closeJournalApp(app)
     }
     @Test func dreamSectionOrderFallsBackForUnknownMissingAndRepeatedNames() {

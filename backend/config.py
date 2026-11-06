@@ -32,6 +32,8 @@ MAX_CANDIDATE_DISTANCE = 0.40
 # A dream whose vector is farther than this from the search wording is left out of a ranked search (cosine distance). With
 # gemini-embedding-001 on 21 October 2026, dreams that answered a search sat at 0.29–0.41 and unrelated ones at 0.43–0.55.
 SEARCH_MAX_DISTANCE = 0.42
+# A note search embeds at most this many notes without a current vector; the provider takes one text per call within one 20 s limit.
+MAX_SEARCH_EMBEDS = 10
 MAX_CANDIDATES = 10
 MAX_MATCH_CANDIDATES = 30
 GROUP_EXAMPLES = 3

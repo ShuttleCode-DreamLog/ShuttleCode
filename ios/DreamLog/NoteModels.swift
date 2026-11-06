@@ -30,7 +30,7 @@ nonisolated struct Memory: Codable, Identifiable {
     var photos: [NotePhoto] = []
 }
 
-nonisolated struct MemoryPage: Decodable { var items: [Memory]; var hasMore: Bool }
+nonisolated struct MemoryPage: Decodable { var items: [Memory]; var hasMore: Bool; var ranked: Bool? }
 nonisolated struct MemoryResponse: Decodable { var memory: Memory }
 nonisolated struct MemorySave: Encodable {
     var baseRevision: Int = 0
@@ -65,6 +65,7 @@ final class NotesModel {
     var isLoading = false
     var error: String?
     var query = ""
+    var ranked = false
     func load(_ app: AppModel, more: Bool = false) async {
         guard app.noticeSeen, !app.deleting, !isLoading, let client = app.client else { return }
         isLoading = true
@@ -76,7 +77,7 @@ final class NotesModel {
         case let .success(page):
             let ids = Set(items.map(\.id))
             items = more ? items + page.items.filter { !ids.contains($0.id) } : page.items
-            hasMore = page.hasMore; error = nil
+            hasMore = page.hasMore; ranked = page.ranked ?? false; error = nil
         case let .failure(failure): error = failure.message
         }
     }

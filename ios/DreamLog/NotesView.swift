@@ -54,7 +54,7 @@ struct NotesView: View {
     private var countLine: String {
         let count = model.items.count
         let entries = "\(count)\(model.hasMore ? "+" : "") \(count == 1 ? "note" : "notes")"
-        return (model.query.isEmpty ? "All notes" : "Notes matching “\(model.query)”") + " · \(entries)"
+        return (model.query.isEmpty ? "All notes" : "Notes matching “\(model.query)”") + " · \(entries)" + (model.ranked ? " · by similarity" : "")
     }
 }
 
