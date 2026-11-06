@@ -210,6 +210,15 @@ CREATE TABLE IF NOT EXISTS memory_vectors (
     updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS analysis_note_choices (
+    dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
+    memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    choice TEXT NOT NULL CHECK (choice IN ('added','removed')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (dream_id, memory_id)
+);
+
 CREATE TABLE IF NOT EXISTS occurrences (
     tag_id TEXT PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -322,6 +331,8 @@ CREATE INDEX IF NOT EXISTS pattern_separations_index_25 ON pattern_separations(o
 CREATE INDEX IF NOT EXISTS dream_vectors_index_26 ON dream_vectors(user_id);
 
 CREATE INDEX IF NOT EXISTS memory_vectors_index_27 ON memory_vectors(user_id);
+
+CREATE INDEX IF NOT EXISTS analysis_note_choices_index_28 ON analysis_note_choices(memory_id);
 
 DROP VIEW IF EXISTS effective_tags;
 CREATE VIEW effective_tags AS

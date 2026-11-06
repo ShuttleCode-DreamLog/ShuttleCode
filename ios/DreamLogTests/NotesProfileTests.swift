@@ -64,6 +64,27 @@ extension FoundationTests {
         #expect(model.ranked)
         await closeJournalApp(app)
     }
+    @Test func analysisNoteChoicesSendPutOrDeleteAndShowTheReturnedAnalysis() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let dreamID = newID(), picked = newID(), added = newID()
+        let body = { (choice: Any) in try JSONSerialization.data(withJSONObject: ["analysis": [
+            "id": "o1", "status": "outdated", "dream_revision": 1, "sections": [], "withheld": 0, "removed_sources": 0, "dream_date": "2026-10-15",
+            "mood": NSNull(), "model": "m", "instruction_version": "analyze-1", "created_at": 1760371200000,
+            "context": [["label": "M1", "kind": "memory", "source_id": picked, "source_revision": 1, "source_date": NSNull(), "available": true, "cut_to": NSNull(), "title": "Station", "choice": choice]],
+            "pending_notes": [["source_id": added, "title": NSNull(), "source_date": "2026-10-13"]]], "task": NSNull()]) }
+        let model = AnalysisModel(dreamId: dreamID)
+        enqueue([(200, try body("removed"))])
+        await model.choose(app, memory: picked, choice: "removed")
+        #expect(model.analysis?.context.first?.choice == "removed" && model.analysis?.pendingNotes?.first?.name == "Life note · \(displayDate("2026-10-13"))")
+        enqueue([(200, try body(NSNull()))])
+        await model.choose(app, memory: picked, choice: nil)
+        #expect(model.analysis?.context.first?.choice == nil && model.error == nil && !model.isSending)
+        let requests = BackendProtocol.state.withLock { $0.requests }
+        #expect(requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" } == ["PUT /v1/dreams/\(dreamID)/analysis/notes/\(picked)", "DELETE /v1/dreams/\(dreamID)/analysis/notes/\(picked)"])
+        #expect(sentBody(requests[0])?["choice"] as? String == "removed")
+        await closeJournalApp(app)
+    }
     @Test func dreamSectionOrderFallsBackForUnknownMissingAndRepeatedNames() {
         #expect(dreamSections("") == DreamSection.allCases)
         #expect(dreamSections("analysis,bogus,analysis,tags") == [.analysis, .tags, .originalText, .summary])

@@ -34,6 +34,8 @@ nonisolated struct ContextEntry: Codable, Sendable, Identifiable {
     var sourceDate: String?
     var available: Bool
     var cutTo: Int?
+    var title: String?
+    var choice: String?
     var id: String { label }
     // Labels are never shown to the user (wiki 4.6.7, analysis logic 4).
     var name: String {
@@ -43,7 +45,8 @@ nonisolated struct ContextEntry: Codable, Sendable, Identifiable {
         case (.dream, _): "Dream\(date)"
         case (.output, "ANALYSIS"): "This dream's analysis"
         case (.output, _): "This dream's summary and tags"
-        case (.memory, _): "Life note\(date)"
+        // A note is named by its title so untitled and undated notes are the only ones left as "Life note" (Re-Design list, 6 November 2026).
+        case (.memory, _): "\(title ?? "Life note")\(date)"
         case (.notes, _): "Your correction notes"
         case (.unknown, _): "Source"
         }
@@ -57,6 +60,7 @@ nonisolated struct Analysis: Codable, Sendable {
     var sections: [AnalysisSection]
     var withheld: Int
     var context: [ContextEntry]
+    var pendingNotes: [PendingNote]?
     var removedSources: Int
     var dreamDate: String
     var mood: Mood?
@@ -69,6 +73,15 @@ nonisolated struct Analysis: Codable, Sendable {
     func sources(of section: AnalysisSection) -> [String] {
         section.citations.map { label in context.first { $0.label == label }?.name ?? "A source that has since changed" }
     }
+}
+
+// A note the user added that joins the analysis on the next Update Analysis (Re-Design list, 6 November 2026).
+nonisolated struct PendingNote: Codable, Sendable, Identifiable {
+    var sourceId: String
+    var title: String?
+    var sourceDate: String?
+    var id: String { sourceId }
+    var name: String { (title ?? "Life note") + (sourceDate.map { " · \(displayDate($0))" } ?? "") }
 }
 
 nonisolated struct AnalysisResponse: Decodable { var analysis: Analysis?; var task: TaskInfo? }

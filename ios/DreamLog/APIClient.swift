@@ -164,6 +164,11 @@ final class APIClient {
         let result: Result<TaskResponse, APIError> = await send("POST", "v1/dreams/\(dreamID)/analysis/refresh", RefreshRequest(refreshId: refreshID))
         return result.map(\.task)
     }
+    func chooseAnalysisNote(_ dreamID: String, memoryID: String, choice: String?) async -> Result<AnalysisResponse, APIError> {
+        let path = "v1/dreams/\(dreamID)/analysis/notes/\(memoryID)"
+        guard let choice else { return decode(await response(method: "DELETE", path: path)) }
+        return await send("PUT", path, ["choice": choice])
+    }
     func loadPatterns() async -> Result<PatternsResponse, APIError> { decode(await response(method: "GET", path: "v1/patterns")) }
     func loadTags() async -> Result<TagList, APIError> { decode(await response(method: "GET", path: "v1/tags")) }
     func labelPattern(_ groupID: String, _ value: PatternLabel) async -> Result<PatternsResponse, APIError> {
