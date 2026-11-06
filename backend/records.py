@@ -26,6 +26,8 @@ async def save_output(connection, identity, dream_id, output_type, dream_revisio
 async def source_changed(connection, kind, source_id):
     await connection.execute("UPDATE outputs SET status='outdated' WHERE id IN (SELECT output_id FROM sources WHERE kind=? AND source_id=? AND output_id IS NOT NULL)", (kind, source_id))
     # AI integration point: from the discussion increment, also mark stale every discussion whose ok reply has such a sources row.
+    # Later replies were written with the earlier ones in view, so the whole discussion goes stale, not one reply (wiki 4.3.5).
+    await connection.execute("UPDATE messages SET state='stale' WHERE dream_id IN (SELECT r.dream_id FROM sources s JOIN messages r ON r.id=s.message_id WHERE s.kind=? AND s.source_id=? AND r.state='ok')", (kind, source_id))
 
 
 async def source_removed(connection, kind, source_id, deleted):
@@ -35,13 +37,20 @@ async def source_removed(connection, kind, source_id, deleted):
         content["sections"] = [] if deleted else [section for section in content.get("sections", []) if row["label"] not in section["citations"]]
         content["removed_sources"] = content.get("removed_sources", 0) + int(deleted)
         await connection.execute("UPDATE outputs SET status='outdated',content=? WHERE id=?", (msgspec.json.encode(content).decode(), row["output_id"]))
+    # AI integration point: from the discussion increment, also mark stale or trim the discussions whose replies were given the source.
+    # This reads the sources rows, so it runs before a deletion removes them.
+    for row in await connection.execute_fetchall("SELECT r.dream_id,MIN(r.seq) AS first,MAX(r.state='ok') AS used FROM sources s JOIN messages r ON r.id=s.message_id WHERE s.kind=? AND s.source_id=? AND r.dream_id IS NOT NULL GROUP BY r.dream_id", (kind, source_id)):
+        if deleted:
+            await connection.execute("DELETE FROM messages WHERE dream_id=? AND role='assistant' AND seq>=?", (row["dream_id"], row["first"]))
+        if deleted or row["used"]:
+            await connection.execute("UPDATE messages SET state='stale' WHERE dream_id=?", (row["dream_id"],))
     if deleted:
         await connection.execute("DELETE FROM sources WHERE kind=? AND source_id=?", (kind, source_id))
-    # AI integration point: from the discussion increment, also mark stale or trim the discussions whose replies were given the source.
 
 
 async def dream_text_changed(connection, dream_id):
     await connection.execute("UPDATE outputs SET status='outdated' WHERE dream_id=?", (dream_id,))
+    await connection.execute("UPDATE messages SET state='stale' WHERE dream_id=?", (dream_id,))
     await source_changed(connection, "dream", dream_id)
     # A foundation module imports a component module only inside the calling function (wiki 4.1.1, rule 4).
     import patterns
@@ -149,8 +158,12 @@ async def put_me(request):
         changes["use_history"] = int(fields.use_history)
     if changes:
         async with db.tx() as connection:
+            before = await connection.execute_fetchall("SELECT use_history FROM users WHERE id=?", (identity,))
             # Column names come solely from the fixed allowlist above.
             await connection.execute(f"UPDATE users SET {','.join(f'{column}=?' for column in changes)} WHERE id=?", (*changes.values(), identity))
+            if before and before[0]["use_history"] and changes.get("use_history") == 0:
+                # Discussions that drew on a note or an earlier dream, directly or through their analysis, start afresh (wiki 4.3.6).
+                await connection.execute("UPDATE messages SET state='stale' WHERE dream_id IN (SELECT r.dream_id FROM sources s JOIN messages r ON r.id=s.message_id WHERE s.kind IN ('memory','dream') AND r.state='ok' AND r.user_id=?)", (identity,))
     return json_response(await me_value(identity))
 
 
