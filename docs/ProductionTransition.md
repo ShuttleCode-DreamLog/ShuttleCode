@@ -55,6 +55,10 @@ From 21 October 2026 `main` is the deployed branch: `skeletal_draft` (39 commits
 
 On 21 October 2026 the server was updated to `skeletal_draft` at `e571f10` (`git pull --ff-only`, `uv sync --locked`, `systemctl restart dreamlog`): the restart raised the database to schema version 6 by adding `memories.title`, and journal items now carry `tags`. A throwaway user then saved a note whose title came back trimmed and read a journal item with its `tags` key, and was deleted with `DELETE /v1/me`; the log shows no error.
 
+On 5 November 2026 `main` was fast-forwarded to `b41b5c2`, the dream discussion from `MVP_danqihu` (`GET /v1/dreams/{id}/conversation`, the streamed `POST …/conversation/messages`, `POST …/conversation/restart`), and deployed the same way (`uv sync --locked` changed nothing); a throwaway user then received a streamed reply from `gemini-3.1-flash-lite` through the VM's service account, read it back, restarted the discussion and was deleted with `DELETE /v1/me`. No `.env.sys` change was needed.
+
+From 6 November 2026 the server runs `skeletal_draft` again, at `fea967c`, at the user's request, so the team's current work reaches the server without a merge into `main` first: `main` was merged into `skeletal_draft` beforehand, so the branch holds the discussion as well, and `main` now lags behind it. The switch (`git switch skeletal_draft`, `git pull --ff-only`, `uv sync --locked`, `systemctl restart dreamlog`) kept schema version 6 and added the `memory_vectors` and `analysis_note_choices` tables at startup. It brought the note search by meaning, the folding dream page with Arrange sections and the supporting life notes, the pencil Edit and the Title box, the AI-only summary (a stored summary correction is ignored), the dream page's wait for its own server work, and the `findings-2` naming fix: until then a pattern group whose texts had been cleared was never named again, because the `findings-1` instruction made the model quote excerpts as `evidence`; a group that loses a member now keeps its label until the next refresh. The server had no unnamed group, so nothing had to be re-queued; should one appear, set its `evidence_key` and `tried_key` to NULL in `pattern_groups` and open Patterns once. A throwaway user then had a dream analyzed in 4 seconds, received a streamed discussion reply, searched notes and read patterns, and was deleted. Release builds, which still point at the server, keep working because the branch contains everything `main` has. To return to `main`, run `git switch main` in `/home/ubuntu/dreamlog` first, then the update steps below.
+
 ## Who can deploy
 
 Checked on 21 October 2026. The VM has one login account, `ubuntu`, which is in the `sudo` and `google-sudoers` groups with passwordless sudo. Its `authorized_keys` holds four ed25519 keys managed through the GCP instance metadata: the owner's and three teammates'. Everyone who holds one of them logs in as `ubuntu`, so each can restart the service, edit `/home/ubuntu/.env.sys` and read or change the SQLite database in `/home/ubuntu/dreamlog-data`; the shared account leaves no record of who did what, and the privacy notice's "operators can read" means these four people. Moving to OS Login (per Google account, with its own sudo control) would separate them; that is a change for the team to decide.
@@ -63,7 +67,7 @@ The server holds no GitHub key: `/home/ubuntu/dreamlog` pulls from `git@github.c
 
 ```sh
 ssh -A ubuntu@34.66.84.214
-cd ~/dreamlog && git pull --ff-only   # tracks main; merge the working branch into main first
+cd ~/dreamlog && git pull --ff-only   # tracks skeletal_draft since 6 November 2026 (main until then); push the branch first
 cd backend && uv sync --locked         # uv is in ~/.local/bin
 sudo systemctl restart dreamlog
 sudo journalctl -fu dreamlog           # the database upgrade runs at startup; no vectors_unavailable line should appear
