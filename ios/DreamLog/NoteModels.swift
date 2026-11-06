@@ -171,19 +171,6 @@ final class NoteEditorModel {
             return false
         }
     }
-    // The reading page has no conflict card, so a failed switch reloads the stored note instead (the server keeps a permission change through a text conflict).
-    func setAllowAnalysis(_ app: AppModel, _ allowed: Bool) async {
-        guard !isSending, !isEditing, var change = stored.map(MemorySave.init), current(app), let client = app.client else { return }
-        change.allowAnalysis = allowed
-        isSending = true
-        let result = await client.saveMemory(id, value: change)
-        isSending = false
-        guard current(app) else { return }
-        switch result {
-        case let .success(memory): stored = memory; value = MemorySave(memory); error = nil
-        case .failure: await load(app)
-        }
-    }
     func useStored() {
         guard let stored else { return }
         value = MemorySave(stored); pendingPhotos = []; isEditing = false; conflict = false; error = nil

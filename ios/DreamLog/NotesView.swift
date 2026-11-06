@@ -207,15 +207,14 @@ struct NoteEditorView: View {
             LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
         }.padding(.top, 8)
     }
-    // AI use is the note page's last section (Re-Design list, AI use); reading switches it at once, editing saves it with the note.
+    // AI use is the note page's last section (Re-Design list, AI use), with the controls the More fold had: the switch while editing, its state while reading.
     @ViewBuilder private var aiUseBlock: some View {
         @Bindable var editor = model
         if model.isEditing || model.stored != nil { Heading("AI use") }
         if model.isEditing {
-            Toggle("Allow AI use", isOn: $editor.value.allowAnalysis).font(.callout).switchRow().accessibilityIdentifier("noteAllowAI")
+            Toggle("Allow AI use", isOn: $editor.value.allowAnalysis).font(.callout).switchRow()
         } else if let stored = model.stored {
-            Toggle("Allow AI use", isOn: Binding(get: { stored.allowAnalysis }, set: { on in Task { await model.setAllowAnalysis(app, on) } }))
-                .font(.callout).switchRow().accessibilityIdentifier("noteAllowAI")
+            LabeledRow("Allow AI use") { Text(stored.allowAnalysis ? "On" : "Off").font(.callout) }
         }
     }
     @ViewBuilder private var photosBlock: some View {
