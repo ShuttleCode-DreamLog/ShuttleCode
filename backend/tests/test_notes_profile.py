@@ -95,7 +95,10 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     connection = sqlite3.connect(path)
     schema = Path(db.__file__).with_name('schema.sql').read_text()
     connection.executescript(schema)
+    # Version 9 came from two branches: the title owner, and patterns made by hand and dismissed (`dismissed_at` is added
+    # only by the upgrade, so schema.sql lacks it already).
     connection.execute('ALTER TABLE dreams DROP COLUMN title_generated')
+    connection.execute('DROP TABLE pattern_dreams')
     if version < 8:
         connection.execute('DROP VIEW visible_user_tags')
         connection.execute('DROP TABLE imported_tag_links')
@@ -135,6 +138,8 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
         assert [tuple(row) for row in await upgraded.execute_fetchall('SELECT title,text FROM memories')] == [(None, 'Kept note')]
         assert not await upgraded.execute_fetchall('SELECT * FROM profiles')
         assert not await upgraded.execute_fetchall('SELECT * FROM pattern_groups')
+        assert not await upgraded.execute_fetchall('SELECT * FROM pattern_dreams')
+        assert await upgraded.execute_fetchall("SELECT 1 FROM pragma_table_info('pattern_groups') WHERE name='dismissed_at'")
         assert not await upgraded.execute_fetchall('SELECT * FROM dream_vectors')
         assert not await upgraded.execute_fetchall('SELECT * FROM current_occurrences')
         assert not await upgraded.execute_fetchall('PRAGMA foreign_key_check')

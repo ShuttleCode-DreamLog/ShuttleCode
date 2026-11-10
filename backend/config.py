@@ -38,6 +38,8 @@ MAX_MATCH_CANDIDATES = 30
 GROUP_EXAMPLES = 3
 RECURRING_MIN_DREAMS = 3
 RELATED_MIN_DREAMS = 2
+# A dream added by hand has no tag, so the start of its text stands in as its evidence.
+MAX_HAND_EXCERPT_CHARS = 200
 MAX_REFRESH_GROUPS = 10
 GROUP_EVIDENCE_LIMIT = 8
 PATTERN_PERIOD_DAYS = 30

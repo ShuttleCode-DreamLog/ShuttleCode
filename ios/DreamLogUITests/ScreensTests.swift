@@ -91,11 +91,11 @@ final class ScreensTests: XCTestCase {
             card.tap()
             sleep(1)
             snapshot(app, "S06 Pattern")
-            let correct = app.buttons["Correct this pattern"]
-            for _ in 0..<5 where !(correct.exists && correct.isHittable) { app.swipeUp() }
-            correct.tap()
+            app.buttons["Split"].tap()
             sleep(1)
-            snapshot(app, "S06 Correct this pattern")
+            snapshot(app, "S06 Split pattern")
+            app.buttons["Cancel"].firstMatch.tap()
+            sleep(1)
             app.buttons["Back"].firstMatch.tap()
         }
 

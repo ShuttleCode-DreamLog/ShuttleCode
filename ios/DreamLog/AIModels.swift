@@ -146,8 +146,9 @@ nonisolated struct PatternsResponse: Codable, Sendable {
 
 // An empty label removes the user's own name and shows the generated one again.
 nonisolated struct PatternLabel: Encodable { var label: String }
-nonisolated struct PatternDismissal: Encodable { var dreamId: String; var note: String }
-nonisolated struct PatternSplit: Encodable { var dreamIds: [String]; var label: String?; var note: String }
+nonisolated struct PatternDream: Encodable { var dreamId: String }
+nonisolated struct PatternCreation: Encodable { var label: String; var dreamIds: [String] }
+nonisolated struct PatternSplit: Encodable { var dreamIds: [String]; var label: String? }
 
 // The daily limits reset at 00:00 UTC; the app names that moment in the phone's time (wiki 4.4.6).
 func limitReset(_ now: Date = .now) -> String {

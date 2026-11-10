@@ -21,29 +21,42 @@ final class PatternsModel {
         }
     }
     // Renaming, dismissing and splitting each return the whole patterns response, which replaces what is shown (wiki 4.8.10).
-    private func change(_ app: AppModel, split: Bool = false, _ request: (APIClient) async -> Result<PatternsResponse, APIError>) async {
-        guard !isSending, app.noticeSeen, !app.deleting, let client = app.client else { return }
+    @discardableResult
+    private func change(_ app: AppModel, split: Bool = false, _ request: (APIClient) async -> Result<PatternsResponse, APIError>) async -> Bool {
+        guard !isSending, app.noticeSeen, !app.deleting, let client = app.client else { return false }
         isSending = true; changes += 1
         let epoch = app.journalEpoch
         let result = await request(client)
         isSending = false
-        guard epoch == app.journalEpoch, !app.deleting else { return }
+        guard epoch == app.journalEpoch, !app.deleting else { return false }
         switch result {
-        case let .success(value): response = value; error = nil
+        case let .success(value): response = value; error = nil; return true
         case let .failure(failure):
             // A repeated split answers 409; the screen then reads the findings again and still says why.
             if split && failure.status == 409 { await load(app) }
             error = failure.message
+            return false
         }
     }
     func rename(_ app: AppModel, _ finding: Finding, label: String) async {
         await change(app) { await $0.labelPattern(finding.groupId, PatternLabel(label: label)) }
     }
-    func dismiss(_ app: AppModel, _ finding: Finding, dreamId: String, note: String) async {
-        await change(app) { await $0.dismissPattern(finding.groupId, PatternDismissal(dreamId: dreamId, note: note)) }
+    // Dismiss deletes the whole pattern; its dreams stay in the journal.
+    func dismiss(_ app: AppModel, _ finding: Finding) async -> Bool {
+        await change(app) { await $0.deletePattern(finding.groupId) }
     }
-    func split(_ app: AppModel, _ finding: Finding, dreamIds: [String], label: String, note: String) async {
-        await change(app, split: true) { await $0.splitPattern(finding.groupId, PatternSplit(dreamIds: dreamIds, label: label.isEmpty ? nil : label, note: note)) }
+    func removeDream(_ app: AppModel, _ finding: Finding, dreamId: String) async -> Bool {
+        await change(app) { await $0.removePatternDream(finding.groupId, PatternDream(dreamId: dreamId)) }
+    }
+    func create(_ app: AppModel, label: String, dreamIds: [String]) async -> Bool {
+        await change(app) { await $0.createPattern(PatternCreation(label: label, dreamIds: dreamIds)) }
+    }
+    func addDream(_ app: AppModel, _ finding: Finding, dreamId: String) async {
+        await change(app) { await $0.addPatternDream(finding.groupId, PatternDream(dreamId: dreamId)) }
+    }
+    @discardableResult
+    func split(_ app: AppModel, _ finding: Finding, dreamIds: [String], label: String) async -> Bool {
+        await change(app, split: true) { await $0.splitPattern(finding.groupId, PatternSplit(dreamIds: dreamIds, label: label.isEmpty ? nil : label)) }
     }
     func retry(_ app: AppModel) async {
         guard !isSending, let task = response?.task, let client = app.client else { return }
@@ -71,6 +84,7 @@ struct PatternsView: View {
     @State private var selected: String?
     @State private var query = ""
     var body: some View {
+        @Bindable var app = app
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 13) {
@@ -80,7 +94,6 @@ struct PatternsView: View {
                     }.pickerStyle(.segmented)
                     if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
                     if let response = model.response {
-                        Hint("\(displayDate(response.period.fromDate)) – \(displayDate(response.period.toDate)) · \(response.eligibleDreams) eligible recorded dreams")
                         if !response.available {
                             Text("New matching is not available on the server at the moment. Patterns found earlier are still shown.").font(.callout).card()
                         }
@@ -113,6 +126,10 @@ struct PatternsView: View {
             .onChange(of: path) { _, value in if value.isEmpty { Task { await model.load(app) } } }
             .onChange(of: app.refreshes) { Task { await model.load(app) } }
         }
+        // On the stack, not its root page, so the bar's + also works while a pattern is open.
+        .sheet(isPresented: $app.newPattern, onDismiss: { Task { await model.load(app) } }) {
+            NavigationStack { NewPatternView(model: model) }
+        }
     }
     // Garden: the same findings as plants sized by the number of distinct dreams that contain them (EGMUIUX S10).
     @ViewBuilder private func gardenBlock(_ response: PatternsResponse) -> some View {
@@ -120,11 +137,10 @@ struct PatternsView: View {
         BubbleCluster(bubbles: response.findings.map { Bubble(id: $0.groupId, label: $0.name, weight: Double($0.supportingDreams)) },
                       selected: current?.groupId) { selected = $0 }
             .padding(.vertical, 8)
+        // The tapped bubble shows its pattern as the List's card; the dreams are on the pattern's own page.
         if let current {
-            Heading("\(current.name) · \(current.supportingDreams) distinct dreams")
-            ForEach(current.dreams) { example in
-                NavigationLink(value: Route.dream(example.dreamId)) { ExampleCard(example: example) }.buttonStyle(.plain)
-            }
+            NavigationLink(value: PatternRoute(groupId: current.groupId)) { FindingCard(finding: current) }
+                .buttonStyle(.plain).accessibilityIdentifier("patternCard")
         }
     }
 }
@@ -168,53 +184,40 @@ struct ExampleCard: View {
 }
 
 // The prototype's pattern page: Rename, Supporting dreams, Summary & analysis; split and dismiss stay under Correct this pattern.
+// Rename, Split and Dismiss sit at the top, then Summary & analysis, then the supporting dreams with their editor (Pattern page, 10 November 2026).
 struct PatternDetailView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
     let groupId: String
     let model: PatternsModel
     @State private var renaming = false
     @State private var name = ""
-    @State private var correcting = false
-    @State private var moving: Set<String> = []
-    @State private var newName = ""
-    @State private var splitNote = ""
-    @State private var confirmingSplit = false
-    @State private var dismissing: FindingExample?
-    @State private var dismissNote = ""
+    @State private var splitting = false
+    @State private var dismissing = false
+    @State private var editingDreams = false
     private var finding: Finding? { model.response?.findings.first { $0.groupId == groupId } }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 if let error = model.error { ErrorCard(error) }
-                if let response = model.response, let finding {
-                    HStack {
-                        Eyebrow("A thread across dreams")
-                        Spacer()
+                if let finding {
+                    HStack(spacing: 8) {
                         Button("Rename") { name = finding.label ?? ""; renaming = true }.buttonStyle(.secondary)
-                    }
-                    Text("\(finding.periodCount) of \(response.eligibleDreams) eligible recorded dreams (\(displayDate(response.period.fromDate)) – \(displayDate(response.period.toDate))), in \(finding.supportingDreams) recorded dreams in all.")
-                        .font(.callout)
-                    if let trend = trendText(finding, response) { Hint(trend) }
-                    Heading("Supporting dreams")
-                    ForEach(finding.dreams) { example in
-                        NavigationLink(value: Route.dream(example.dreamId)) { ExampleCard(example: example) }.buttonStyle(.plain)
+                        Button("Split") { splitting = true }.buttonStyle(.secondary).disabled(finding.supportingDreams < 2)
+                        Button("Dismiss") { dismissing = true }.buttonStyle(.secondary)
                     }
                     Heading("Summary & analysis")
                     if finding.status == .refreshing { Label("The explanation is being updated.", systemImage: "hourglass").font(.callout) }
                     else if let explanation = finding.explanation { Text(explanation).font(.callout) }
                     else { Hint("No explanation yet") }
-                    if !finding.notes.isEmpty {
-                        Hint("Your notes sent with this pattern")
-                        ForEach(finding.notes, id: \.self) { Text($0).font(.callout) }
+                    HStack(alignment: .firstTextBaseline) {
+                        Heading("Supporting dreams")
+                        Spacer()
+                        Button("Edit (\(finding.supportingDreams)) ›") { editingDreams = true }.buttonStyle(.quiet).accessibilityIdentifier("editSupportingDreams")
                     }
-                    ForEach(finding.dismissalNotes, id: \.dreamId) { note in
-                        HStack {
-                            Text("Dismissal note: \(note.note)").font(.callout)
-                            Spacer()
-                            Button("Remove note") { Task { await model.dismiss(app, finding, dreamId: note.dreamId, note: "") } }.buttonStyle(.quiet)
-                        }
+                    ForEach(finding.dreams) { example in
+                        NavigationLink(value: Route.dream(example.dreamId)) { ExampleCard(example: example) }.buttonStyle(.plain)
                     }
-                    DisclosureGroup("Correct this pattern", isExpanded: $correcting) { corrections(finding) }.font(.callout).padding(.top, 8)
                 } else if model.response != nil {
                     EmptyCard("This pattern is no longer among the findings")
                 }
@@ -224,25 +227,25 @@ struct PatternDetailView: View {
         }
         .dreamPage()
         .page(Header(finding?.name ?? "Pattern", leading: { BackButton() }, trailing: { HomeButton() }))
+        .disabled(model.isSending)
         .alert("Rename pattern", isPresented: $renaming) {
             TextField("Pattern name", text: $name)
             Button("Save") { rename() }
             if finding?.labelCorrected == true { Button("Use generated name") { if let finding { Task { await model.rename(app, finding, label: "") } } } }
             Button("Cancel", role: .cancel) {}
         } message: { Text("Corrections change the pattern, not your dream text.") }
-        .confirmationDialog("The dreams you move will not be grouped with the others again, in either direction. A note written with a split cannot be removed later.", isPresented: $confirmingSplit, titleVisibility: .visible) {
-            Button("Save Split") {
+        .confirmationDialog("Dismiss “\(finding?.name ?? "this pattern")”? The pattern is deleted; its dreams stay in your journal.", isPresented: $dismissing, titleVisibility: .visible) {
+            Button("Dismiss pattern", role: .destructive) {
                 guard let finding else { return }
-                Task { await model.split(app, finding, dreamIds: Array(moving), label: newName.trimmingCharacters(in: .whitespacesAndNewlines), note: splitNote); moving = []; newName = ""; splitNote = "" }
+                Task { if await model.dismiss(app, finding) { dismiss() } }
             }
         }
-        .alert("Not part of this pattern?", isPresented: Binding(get: { dismissing != nil }, set: { if !$0 { dismissing = nil } }), presenting: dismissing) { example in
-            TextField("Why it does not belong (optional)", text: $dismissNote)
-            Button("Dismiss", role: .destructive) { if let finding { Task { await model.dismiss(app, finding, dreamId: example.dreamId, note: dismissNote); dismissNote = "" } } }
-                .disabled(dismissNote.count > app.limits.maxPatternNoteChars)
-            Button("Cancel", role: .cancel) {}
-        } message: { example in
-            Text("“\(example.name)” will not be put back into “\(finding?.name ?? "this pattern")”, and it will not be grouped again with the other \(max(0, (finding?.supportingDreams ?? 1) - 1)) dreams of this theme. This cannot be taken back. A note tells later matching why, and is sent to the AI service with the group.")
+        .sheet(isPresented: $splitting) {
+            if let finding { NavigationStack { PatternSplitSheet(finding: finding, model: model) }.presentationDetents([.medium, .large]) }
+        }
+        // The sheet is its own presentation, so it carries the routes its dream links open.
+        .sheet(isPresented: $editingDreams) {
+            NavigationStack { SupportingDreamsSheet(groupId: groupId, model: model) }
         }
     }
     private func rename() {
@@ -251,37 +254,170 @@ struct PatternDetailView: View {
         guard !label.isEmpty, label.count <= app.limits.maxLabelChars else { model.error = "Give the pattern a name of 1 to \(app.limits.maxLabelChars) characters."; return }
         Task { await model.rename(app, finding, label: label) }
     }
-    private func trendText(_ finding: Finding, _ response: PatternsResponse) -> String? {
-        let comparison = "\(finding.periodCount) of \(response.eligibleDreams) now, \(finding.previousCount) of \(response.previousEligibleDreams) in the period before"
-        return switch finding.trend {
-        case .moreOftenRecordedRecently: "More often recorded recently: \(comparison)."
-        case .lessOftenRecordedRecently: "Less often recorded recently: \(comparison)."
-        case .same: "Recorded as often as before: \(comparison)."
-        case .unknown, nil: nil
+}
+
+struct PatternSplitSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let finding: Finding
+    let model: PatternsModel
+    @State private var moving: Set<String> = []
+    @State private var newName = ""
+    @State private var confirming = false
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Eyebrow("Dreams for the new pattern")
+                ForEach(finding.dreams) { example in
+                    Toggle(example.name, isOn: Binding(get: { moving.contains(example.dreamId) }, set: { if $0 { moving.insert(example.dreamId) } else { moving.remove(example.dreamId) } }))
+                }
+                TextField("Name of the new pattern (optional)", text: $newName).field()
+                Hint(preview)
+                if let error = model.error { Hint(error) }
+                Button("Save Split") { confirming = true }.buttonStyle(.primary)
+                    .disabled(moving.isEmpty || moving.count >= finding.supportingDreams || model.isSending)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .dreamPage()
+        .page(Header("Split pattern", leading: { BackButton(label: "Cancel") { dismiss() } }, trailing: { EmptyView() }), aboveBar: false)
+        .confirmationDialog("The dreams you move will not be grouped with the others again, in either direction.", isPresented: $confirming, titleVisibility: .visible) {
+            Button("Save Split") {
+                Task { if await model.split(app, finding, dreamIds: Array(moving), label: newName.trimmingCharacters(in: .whitespacesAndNewlines)) { dismiss() } }
+            }
         }
     }
-    @ViewBuilder private func corrections(_ finding: Finding) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Split: choose the dreams that belong to a separate group").font(.callout.weight(.semibold))
-            ForEach(finding.dreams) { example in
-                Toggle(example.name, isOn: Binding(get: { moving.contains(example.dreamId) }, set: { if $0 { moving.insert(example.dreamId) } else { moving.remove(example.dreamId) } }))
-            }
-            TextField("Name of the new group (optional)", text: $newName).field()
-            TextField("Note: why these do not belong together (optional)", text: $splitNote).field()
-            Hint(splitPreview(finding))
-            Button("Save Split") { confirmingSplit = true }.buttonStyle(.primary)
-                .disabled(moving.isEmpty || moving.count >= finding.supportingDreams || splitNote.count > app.limits.maxPatternNoteChars)
-        }.padding(.top, 10)
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Dismiss a dream from this pattern").font(.callout.weight(.semibold))
-            ForEach(finding.dreams) { example in
-                Button("Not part of this pattern: \(example.name)") { dismissing = example }.buttonStyle(.quiet)
-            }
-        }.padding(.top, 10)
-    }
-    private func splitPreview(_ finding: Finding) -> String {
+    private var preview: String {
         let remaining = finding.supportingDreams - moving.count
         let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return "“\(finding.name)” keeps \(remaining) dream\(remaining == 1 ? "" : "s") · “\(name.isEmpty ? "New group" : name)” gets \(moving.count) dream\(moving.count == 1 ? "" : "s")"
+        return "“\(finding.name)” keeps \(remaining) dream\(remaining == 1 ? "" : "s") · “\(name.isEmpty ? "New pattern" : name)” gets \(moving.count) dream\(moving.count == 1 ? "" : "s")"
+    }
+}
+
+// Like an analysis's Supporting life notes: each dream can be taken out, with Undo while the sheet is open, and + Add dream picks from the journal.
+struct SupportingDreamsSheet: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let groupId: String
+    let model: PatternsModel
+    @State private var removed: [FindingExample] = []
+    @State private var picking = false
+    private var finding: Finding? { model.response?.findings.first { $0.groupId == groupId } }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                if let finding {
+                    let members = Set(finding.dreams.map(\.dreamId))
+                    ForEach(finding.dreams) { example in
+                        HStack {
+                            NavigationLink(value: Route.dream(example.dreamId)) { row(example, hint: shortDate(example.dreamDate)) }.buttonStyle(.plain)
+                            // A pattern needs two dreams; below that the whole pattern is dismissed instead.
+                            Button { remove(finding, example) } label: { Image(systemName: "minus.circle").foregroundStyle(Color.muted) }
+                                .buttonStyle(.plain).disabled(model.isSending || finding.supportingDreams <= 2).accessibilityLabel("Remove \(example.name)")
+                        }
+                    }
+                    ForEach(removed.filter { !members.contains($0.dreamId) }) { example in
+                        HStack {
+                            row(example, hint: "Removed")
+                            Button("Undo") { Task { await model.addDream(app, finding, dreamId: example.dreamId) } }.buttonStyle(.quiet).disabled(model.isSending)
+                        }
+                    }
+                    if let error = model.error { Hint(error) }
+                    Button("+ Add dream") { picking = true }.buttonStyle(.quiet).disabled(model.isSending).accessibilityIdentifier("addPatternDream")
+                } else {
+                    EmptyCard("This pattern is no longer among the findings")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .dreamPage()
+        .page(Header("Supporting dreams", leading: { BackButton(label: "Done") { dismiss() } }, trailing: { EmptyView() }), aboveBar: false)
+        .routeDestinations()
+        .sheet(isPresented: $picking) {
+            NavigationStack {
+                DreamPickerView(excluded: Set(finding?.dreams.map(\.dreamId) ?? [])) { item in
+                    if let finding { Task { await model.addDream(app, finding, dreamId: item.id) } }
+                }
+            }
+        }
+    }
+    private func row(_ example: FindingExample, hint: String) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) { Text(example.name).font(.callout); Hint(hint) }
+            Spacer()
+        }
+    }
+    private func remove(_ finding: Finding, _ example: FindingExample) {
+        Task { if await model.removeDream(app, finding, dreamId: example.dreamId) { removed.append(example) } }
+    }
+}
+
+struct DreamPickerView: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let excluded: Set<String>
+    let pick: (JournalItem) -> Void
+    @State private var model = JournalModel()
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 13) {
+                if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
+                let dreams = model.items.filter { !excluded.contains($0.id) }
+                if dreams.isEmpty && !model.isLoading { EmptyCard("No other dreams to add") }
+                ForEach(dreams) { item in Button { pick(item); dismiss() } label: { DreamCard(row: JournalRow(id: item.id, item: item)) }.buttonStyle(.plain) }
+                if model.hasMore {
+                    Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading)
+                }
+                if model.isLoading { ProgressView().frame(maxWidth: .infinity) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .dreamPage()
+        .page(Header("Add dream", leading: { BackButton(label: "Done") { dismiss() } }, trailing: { EmptyView() }), aboveBar: false)
+        .task { await model.load(app) }
+    }
+}
+
+// A pattern made by hand: the user's title and two or more supporting dreams, tagged or not; the AI writes only the analysis.
+struct NewPatternView: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let model: PatternsModel
+    @State private var title = ""
+    @State private var dreams: [JournalItem] = []
+    @State private var picking = false
+    var body: some View {
+        let label = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                TextField("Title", text: $title).field().accessibilityIdentifier("patternTitle")
+                Heading("Supporting dreams")
+                ForEach(dreams) { item in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) { Text(item.title ?? "Dream of \(displayDate(item.dreamDate))").font(.callout); Hint(shortDate(item.dreamDate)) }
+                        Spacer()
+                        Button { dreams.removeAll { $0.id == item.id } } label: { Image(systemName: "minus.circle").foregroundStyle(Color.muted) }
+                            .buttonStyle(.plain).accessibilityLabel("Remove \(item.title ?? "dream")")
+                    }
+                }
+                Button("+ Add dream") { picking = true }.buttonStyle(.quiet).accessibilityIdentifier("addPatternDream")
+                if let error = model.error { Hint(error) }
+                Button("Save pattern") { save(label) }.buttonStyle(.primary)
+                    .disabled(label.isEmpty || label.count > app.limits.maxLabelChars || dreams.count < 2 || model.isSending)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .dreamPage()
+        .page(Header("Add pattern", leading: { BackButton(label: "Cancel") { dismiss() } }, trailing: { EmptyView() }), aboveBar: false)
+        .sheet(isPresented: $picking) {
+            NavigationStack { DreamPickerView(excluded: Set(dreams.map(\.id))) { item in dreams.append(item) } }
+        }
+    }
+    private func save(_ label: String) {
+        Task { if await model.create(app, label: label, dreamIds: dreams.map(\.id)) { dismiss() } }
     }
 }

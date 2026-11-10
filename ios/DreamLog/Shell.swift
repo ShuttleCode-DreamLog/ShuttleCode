@@ -97,6 +97,7 @@ extension View {
 
 // The prototype's bottom bar: four screens and the + that opens the dream editor, or the note editor on Life notes.
 // Patterns' + reads Add pattern and still opens the dream editor.
+// Since 10 November 2026 Patterns' + opens the new-pattern sheet: a title and the supporting dreams.
 struct BottomBar: View {
     @Environment(AppModel.self) private var app
     var body: some View {
@@ -104,7 +105,13 @@ struct BottomBar: View {
         HStack(alignment: .top, spacing: 0) {
             item("Journal", "list.bullet.rectangle.portrait", .journal)
             item("Pattern", "lightbulb", .patterns)
-            Button { if addsNote { app.newNote = EntryRoute(id: newID()) } else { app.newDream = EntryRoute(id: newID()) } } label: {
+            Button {
+                switch (addsNote, app.tab == .patterns && !app.showingHome) {
+                case (true, _): app.newNote = EntryRoute(id: newID())
+                case (_, true): app.newPattern = true
+                default: app.newDream = EntryRoute(id: newID())
+                }
+            } label: {
                 VStack(spacing: 4) {
                     Image(systemName: "plus").font(.system(size: 22, weight: .medium)).foregroundStyle(.white)
                         .frame(width: 42, height: 32).background(Color.sage, in: RoundedRectangle(cornerRadius: 12))

@@ -86,6 +86,9 @@ async def open_database(path):
 ALTER TABLE dreams ADD COLUMN title_generated INTEGER NOT NULL DEFAULT 0 CHECK(title_generated IN (0,1));
 UPDATE dreams SET title_generated=1 WHERE title IN (SELECT json_extract(content,'$.title') FROM outputs WHERE outputs.dream_id=dreams.id AND type='organization');
 COMMIT;""")
+        # Version 9 marks dismissed patterns; they keep their tags so neither the pattern nor its tags are offered to the AI again.
+        if "dismissed_at" not in {row["name"] for row in await rwdb.execute_fetchall("PRAGMA table_info(pattern_groups)")}:
+            await rwdb.execute("ALTER TABLE pattern_groups ADD COLUMN dismissed_at INTEGER")
         await load_vectors()
         return rwdb
     except BaseException:

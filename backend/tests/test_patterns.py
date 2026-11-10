@@ -300,7 +300,7 @@ async def test_decision_checks_and_no_merging(client, clock, ai):
     await dream(client, headers, user, 'zebra')
     assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_memberships WHERE dream_id=?', (unlabeled,))
     provenance = await db.rwdb.execute_fetchall('SELECT model,instruction_version FROM pattern_memberships WHERE user_id=? UNION SELECT model,instruction_version FROM pattern_groups WHERE user_id=?', (user, user))
-    assert {tuple(row) for row in provenance} <= {('test-text-model', 'match-1'), ('test-text-model', 'findings-2')}
+    assert {tuple(row) for row in provenance} <= {('test-text-model', 'match-2'), ('test-text-model', 'findings-2')}
 
 
 async def test_findings_counts_thresholds_and_trend(client, clock, ai):
@@ -441,17 +441,10 @@ async def test_dismissal_constraint_notes_and_repeats(client, clock, ai):
     assert label is not None and (await db.rwdb.execute_fetchall('SELECT label FROM pattern_groups WHERE id=?', (group_id,)))[0][0] == label
     assert len(await tasks_of('refresh_findings', user=user)) == refreshes
     await dream(client, headers, user, 'teacher')
-    offered = [call for call in ai.calls if call.name == 'matching'][-1]
-    assert 'Two different teachers.' in offered.content and 'Two different teachers.' not in offered.instruction
+    # Correction notes are never sent to the AI (10 November 2026).
+    assert all('Two different teachers.' not in call.content + call.instruction for call in ai.calls)
     finding = next(f for f in (await found(client, headers))['findings'] if f['group_id'] == group_id)
     assert finding['notes'] == ['Two different teachers.'] and finding['dismissal_notes'] == [{'dream_id': a, 'note': 'Two different teachers.'}]
-    await client.put(f'/v1/dreams/{a}/permissions', headers=headers, json={'patterns': False})
-    await dream(client, headers, user, 'teacher')
-    assert 'Two different teachers.' not in [call for call in ai.calls if call.name == 'matching'][-1].content
-    await client.put(f'/v1/dreams/{a}/permissions', headers=headers, json={'patterns': True})
-    await run_all()
-    await dream(client, headers, user, 'teacher')
-    assert 'Two different teachers.' in [call for call in ai.calls if call.name == 'matching'][-1].content
     await client.post(url, headers=headers, json={'dream_id': a, 'note': ''})
     cleared = next(f for f in (await found(client, headers))['findings'] if f['group_id'] == group_id)
     assert (cleared['notes'], cleared['dismissal_notes']) == ([], []) and await db.rwdb.execute_fetchall("SELECT 1 FROM pattern_corrections WHERE dream_id=? AND kind='dismissed'", (a,))
@@ -770,3 +763,65 @@ async def test_a_lost_member_keeps_the_name_and_quoted_evidence_still_counts(cli
     await run_all()
     named = (await found(client, headers))['findings'][0]
     assert (named['label'], named['status']) == ('quoted lakes', 'current') and all(example['shared_element'] == 'shared situation' for example in named['examples'])
+
+
+async def test_a_dismissed_pattern_is_hidden_and_never_offered_again(client, clock, ai):
+    headers, user = person()
+    a, b, c = [await dream(client, headers, user, 'teacher') for _ in range(3)]
+    group_id = (await found(client, headers))['findings'][0]['group_id']
+    assert (await client.delete(f'/v1/patterns/groups/{group_id}', headers=credential())).status_code == 404
+    response = await client.delete(f'/v1/patterns/groups/{group_id}', headers=headers)
+    assert response.status_code == 200 and group_id not in [finding['group_id'] for finding in response.json()['findings']]
+    for path, body in (('label', {'label': 'x'}), ('dreams', {'dream_id': a}), ('split', {'dream_ids': [a]})):
+        assert (await client.request('PUT' if path == 'label' else 'POST', f'/v1/patterns/groups/{group_id}/{path}', headers=headers, json=body)).status_code == 404
+    assert (await client.delete(f'/v1/patterns/groups/{group_id}', headers=headers)).status_code == 404
+    calls = len(ai.calls)
+    await dream(client, headers, user, 'teacher')
+    assert all('teacher' not in call.content.split('Candidate groups:')[1] for call in ai.calls[calls:] if call.name == 'matching')
+    assert len(await db.rwdb.execute_fetchall('SELECT 1 FROM dreams WHERE id IN (?,?,?)', (a, b, c))) == 3
+    assert all(finding['group_id'] != group_id for finding in (await found(client, headers))['findings'])
+
+
+async def test_adding_a_dream_by_hand_needs_no_tag(client, clock, ai):
+    headers, user = person()
+    a, b, c = [await dream(client, headers, user, 'teacher') for _ in range(3)]
+    group_id = (await found(client, headers))['findings'][0]['group_id']
+    url = f'/v1/patterns/groups/{group_id}/dreams'
+    await client.post(f'/v1/patterns/groups/{group_id}/dismiss', headers=headers, json={'dream_id': a})
+    await run_all()
+    added = await client.post(url, headers=headers, json={'dream_id': a})
+    assert added.status_code == 200 and next(f for f in added.json()['findings'] if f['group_id'] == group_id)['supporting_dreams'] == 3
+    assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_separations WHERE ? IN (dream_id,other_dream_id) UNION ALL SELECT 1 FROM pattern_corrections WHERE dream_id=?', (a, a))
+    untagged = await journal(client, headers, 'A dream with no tags yet.')
+    finding = next(f for f in (await client.post(url, headers=headers, json={'dream_id': untagged})).json()['findings'] if f['group_id'] == group_id)
+    hand = next(example for example in finding['examples'] if example['dream_id'] == untagged)
+    assert (finding['supporting_dreams'], finding['status'], hand['description'], hand['excerpt']) == (4, 'refreshing', 'Added by you', 'A dream with no tags yet.')
+    await run_all()
+    refreshed = next(f for f in (await found(client, headers))['findings'] if f['group_id'] == group_id)
+    assert refreshed['status'] == 'current' and 'A dream with no tags yet.' in [call for call in ai.calls if call.name == 'findings'][-1].content
+    await client.post(f'/v1/patterns/groups/{group_id}/dismiss', headers=headers, json={'dream_id': untagged})
+    assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_dreams WHERE dream_id=?', (untagged,))
+    assert (await client.post(url, headers=headers, json={'dream_id': b})).status_code == 409
+    closed = await journal(client, headers, 'Private.', permissions={'analysis': False})
+    assert (await client.post(url, headers=headers, json={'dream_id': closed})).status_code == 409
+    assert (await client.post(url, headers=headers, json={'dream_id': str(uuid4())})).status_code == 404
+    assert (await client.post(url, headers=credential(), json={'dream_id': a})).status_code == 404
+
+
+async def test_a_pattern_made_by_hand_keeps_its_name(client, clock, ai):
+    headers, user = person()
+    a = await dream(client, headers, user, 'teacher')
+    b = await journal(client, headers, 'Untagged account one.')
+    c = await journal(client, headers, 'Untagged account two.')
+    url = '/v1/patterns/groups'
+    for body, status in (({'label': ' ', 'dream_ids': [a, b]}, 400), ({'label': 'x' * 61, 'dream_ids': [a, b]}, 413), ({'label': 'Mine', 'dream_ids': [a, a]}, 400),
+                         ({'label': 'Mine', 'dream_ids': [a, str(uuid4())]}, 404)):
+        assert (await client.post(url, headers=headers, json=body)).status_code == status
+    assert (await client.post(url, headers=credential(), json={'label': 'Mine', 'dream_ids': [b, c]})).status_code == 404
+    made = await client.post(url, headers=headers, json={'label': 'School and trains', 'dream_ids': [a, b, c]})
+    assert made.status_code == 200
+    finding = next(f for f in made.json()['findings'] if f['label'] == 'School and trains')
+    assert (finding['label_corrected'], finding['supporting_dreams'], finding['status']) == (True, 3, 'refreshing')
+    await run_all()
+    after = next(f for f in (await found(client, headers))['findings'] if f['group_id'] == finding['group_id'])
+    assert (after['label'], after['status']) == ('School and trains', 'current') and after['explanation']
