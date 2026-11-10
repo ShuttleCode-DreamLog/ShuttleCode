@@ -55,7 +55,7 @@ final class ScreensTests: XCTestCase {
             titleField.tap(); titleField.typeText(title)
             let body = app.textViews["journalText"]
             body.tap(); body.typeText(text)
-            app.buttons["Done"].tap()
+            app.buttons["saveDream"].tap()
             XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 15))
             seeded = true
         }

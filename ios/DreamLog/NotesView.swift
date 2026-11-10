@@ -133,11 +133,20 @@ struct NoteEditorView: View {
     @FocusState private var writingText: Bool
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var removingPhoto: String?
+    @State private var editing = false
     let newEntry: Bool
+    let presented: Bool
     init(id: String, newEntry: Bool = false, text: String = "") {
         _model = State(initialValue: NoteEditorModel(id: id, newEntry: newEntry, text: text))
-        self.newEntry = newEntry
+        self.newEntry = newEntry; presented = false
     }
+    // `presented` is the editor Edit opens over a note's page, as a dream's Edit does (10 November 2026): it starts editing the
+    // note and closes once it is saved.
+    init(editing memory: Memory, photos: [String: Data], epoch: Int) {
+        _model = State(initialValue: NoteEditorModel(editing: memory, photos: photos, epoch: epoch))
+        newEntry = false; presented = true
+    }
+    private var inSheet: Bool { newEntry || presented }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 13) {
@@ -151,7 +160,7 @@ struct NoteEditorView: View {
                 if model.isEditing {
                     HStack(spacing: 10) {
                         Button("Cancel") { cancel() }.buttonStyle(.secondary)
-                        Button("Save note") { Task { await save() } }.buttonStyle(.primary).disabled(!model.canSave(app)).accessibilityIdentifier("saveNote")
+                        Button("Save note") { Task { await save(close: presented) } }.buttonStyle(.primary).disabled(!model.canSave(app)).accessibilityIdentifier("saveNote")
                     }.padding(.top, 8)
                 } else if model.stored != nil {
                     Button("Delete note", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet).padding(.top, 8)
@@ -161,9 +170,12 @@ struct NoteEditorView: View {
             .padding(24)
         }
         .dreamPage()
-        .page(header, aboveBar: !newEntry)
+        .page(header, aboveBar: !inSheet)
         .disabled(model.isSending)
         .task { await model.load(app) }
+        .sheet(isPresented: $editing, onDismiss: reload) {
+            if let stored = model.stored { NavigationStack { NoteEditorView(editing: stored, photos: model.photoContent, epoch: app.journalEpoch) } }
+        }
         .task(id: awaitingTitle) {
             var pause = 2
             while awaitingTitle, (try? await Task.sleep(for: .seconds(pause))) != nil {
@@ -194,7 +206,7 @@ struct NoteEditorView: View {
     }
     @ViewBuilder private var header: some View {
         let title = model.isEditing ? (newEntry ? "New note" : "Edit note") : (model.stored.map(noteLabel) ?? "Note")
-        if newEntry {
+        if inSheet {
             Header(title, leading: { BackButton(label: "Done") { close() } }, trailing: { EmptyView() })
         } else {
             Header(title, leading: { BackButton() }, trailing: { HomeButton() })
@@ -250,7 +262,8 @@ struct NoteEditorView: View {
         HStack(alignment: .firstTextBaseline) {
             Hint(stored.eventDate.map(displayDate) ?? stored.recordedAt.formatted(date: .abbreviated, time: .omitted))
             Spacer()
-            Button("Edit", systemImage: "pencil") { model.isEditing = true }.buttonStyle(.secondary)
+            // A sheet's own note is edited in place; the page opens the editor over itself.
+            Button("Edit", systemImage: "pencil") { if inSheet { model.isEditing = true } else { editing = true } }.buttonStyle(.secondary)
         }
         Text(stored.text).font(.callout).textSelection(.enabled)
         VStack(alignment: .leading, spacing: 0) {
@@ -296,14 +309,14 @@ struct NoteEditorView: View {
             }
         }
     }
-    private var awaitingTitle: Bool { !model.isEditing && model.stored?.titlePending == true }
+    private var awaitingTitle: Bool { !model.isEditing && !editing && model.stored?.titlePending == true }
     private func reload() { Task { await model.load(app) } }
     private func close() {
         guard !model.isSending, !model.isAddingPhotos else { return }
         if model.hasChanges { confirmingClose = true } else { dismiss() }
     }
     private func cancel() {
-        if model.stored != nil { model.useStored() } else { close() }
+        if model.stored != nil && !presented { model.useStored() } else { close() }
     }
     private func save(close: Bool = false) async {
         writingText = false

@@ -104,6 +104,11 @@ final class NoteEditorModel {
     var isAddingPhotos = false
     // `text` starts a new note from a message the user wrote in a discussion (Remember in profile, wiki 4.6.6, rule 2).
     init(id: String, newEntry: Bool = false, text: String = "") { self.id = id; self.newEntry = newEntry; isEditing = newEntry; value.text = text }
+    // Edit on a note's page opens this editor on the note as shown, with the photos already read. The journal epoch is the page's,
+    // so an editor left open across whole-journal deletion is still rejected.
+    init(editing memory: Memory, photos: [String: Data], epoch: Int) {
+        id = memory.id; newEntry = false; isEditing = true; stored = memory; value = MemorySave(memory); photoContent = photos; self.epoch = epoch
+    }
     private func current(_ app: AppModel) -> Bool { epoch == app.journalEpoch && app.noticeSeen && !app.deleting }
     var hasChanges: Bool {
         if !pendingPhotos.isEmpty { return true }

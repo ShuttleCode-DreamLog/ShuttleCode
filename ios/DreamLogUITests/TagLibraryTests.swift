@@ -59,6 +59,6 @@ final class TagLibraryTests: XCTestCase {
         }
         app.buttons["tagLibraryDone"].tap()
         // An empty draft is discarded without creating a server dream or scheduling AI.
-        app.buttons["Done"].tap()
+        app.buttons["cancelJournal"].tap()
     }
 }

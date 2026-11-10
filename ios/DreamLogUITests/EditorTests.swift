@@ -62,24 +62,20 @@ final class EditorTests: XCTestCase {
         let journalEditor = app.textViews["journalText"]
         journalEditor.tap(); journalEditor.typeText("Original invented dream.")
         XCTAssertFalse(app.buttons["saveJournal"].exists)
-        app.buttons["Done"].tap()
+        app.buttons["saveDream"].tap()
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 10))
         app.staticTexts[title].firstMatch.tap()
         XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 5))
         app.buttons["Edit Dream"].tap()
         XCTAssertTrue(journalEditor.waitForExistence(timeout: 5))
         journalEditor.tap(); journalEditor.typeText(" Discard this edit.")
-        app.buttons["revertJournal"].tap()
-        app.buttons["Revert changes"].tap()
-        // Revert turns the editor opened with Edit back to reading the stored dream; the dream's own page underneath shows the
-        // same text, so the editor's text box going away is what says the revert happened.
+        // Cancel with an edit asks, like a life note's; Discard drops the edit and closes the editor over the dream's page.
+        app.buttons["cancelJournal"].tap()
+        app.buttons["Discard"].tap()
         XCTAssertTrue(journalEditor.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Original invented dream."].exists)
         XCTAssertFalse(app.staticTexts["Original invented dream. Discard this edit."].exists)
-        // Reading, the editor's ‹ Done closes it; until it is gone it covers Delete Dream on the page underneath.
-        app.buttons["Done"].tap()
-        XCTAssertTrue(app.buttons["Done"].waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 5))
         let deleteDream = app.buttons["Delete Dream"]
         for _ in 0..<10 where !(deleteDream.exists && deleteDream.isHittable) { app.swipeUp() }
         // Delete Dream ends the page; the drawn bar covers the page's last stretch until it is scrolled to the end.

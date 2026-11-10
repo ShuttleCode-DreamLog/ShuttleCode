@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The prototype's capture screen: the title and text boxes, then date and mood; ✓ saves and closes. Title and text are edited
+// The prototype's capture screen: the title and text boxes, then date and mood; Save dream saves and closes. Title and text are edited
 // together, as on a life note; a title left empty is named by the AI with the summary and tags, and a title of the user's own is
 // never replaced. Voice capture is left out until the backend has it.
 struct DreamEditorView: View {
@@ -10,6 +10,7 @@ struct DreamEditorView: View {
     @State private var model: DreamModel
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
+    @State private var confirmingClose = false
     let newEntry: Bool
     let presented: Bool
 
@@ -50,6 +51,12 @@ struct DreamEditorView: View {
         .confirmationDialog("Revert changes to this journal entry?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
             Button("Revert changes", role: .destructive) { Task { await model.revert(app) } }
         }
+        // The life note editor's Cancel: unsaved changes are saved, dropped, or kept for more editing.
+        .confirmationDialog("This dream has unsaved changes.", isPresented: $confirmingClose, titleVisibility: .visible) {
+            Button("Save and close") { saveAndClose() }
+            Button("Discard", role: .destructive) { Task { await model.revert(app); if model.error == nil { dismiss() } } }
+            Button("Keep editing", role: .cancel) {}
+        }
         // Over a dream's screen only Done closes the editor, so its save finishes before that screen reads the dream again.
         .interactiveDismissDisabled(presented || model.isSending)
         .task { app.editing.insert(model.id); await model.load(app) }
@@ -63,19 +70,11 @@ struct DreamEditorView: View {
             Header(title) {
                 BackButton { Task { if await model.close(app) { dismiss() } } }
             } trailing: {
-                if model.isSending { ProgressView() } else {
-                    Button("Revert") { confirmingDiscard = true }.buttonStyle(.quiet).accessibilityIdentifier("revertJournal")
+                if model.isSending { ProgressView() } else if !presented, let draft = model.draft {
                     // Over a dream's screen, Delete Dream stays on that screen (EGMUIUX S03).
-                    if !presented, let draft = model.draft {
-                        Button { confirmingDelete = true } label: { Image(systemName: "trash").font(.system(size: 20)).foregroundStyle(Color.danger) }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(draft.baseRevision == 0 && !draft.unconfirmed && model.dream == nil ? "Discard draft" : "Delete journal entry")
-                    }
-                    Button { Task { if await model.close(app) { dismiss() } } } label: {
-                        Image(systemName: "checkmark").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
-                            .frame(width: 36, height: 36).background(Color.sage, in: Circle())
-                    }
-                    .buttonStyle(.plain).accessibilityLabel("Done")
+                    Button { confirmingDelete = true } label: { Image(systemName: "trash").font(.system(size: 20)).foregroundStyle(Color.danger) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(draft.baseRevision == 0 && !draft.unconfirmed && model.dream == nil ? "Discard draft" : "Delete journal entry")
                 }
             }
         } else {
@@ -134,5 +133,20 @@ struct DreamEditorView: View {
         } else if model.missing {
             Button("Save as a new journal entry") { Task { await model.saveAsNew(app) } }.buttonStyle(.secondary)
         }
+        // Cancel and Save end the page as on a life note, below the same hairline (10 November 2026, replacing Revert and ✓ in the
+        // header); ‹ still saves on the way out, as leaving always has.
+        Rectangle().fill(Color.line).frame(height: 1).padding(.top, 8)
+        HStack(spacing: 10) {
+            Button("Cancel") { cancel(draft) }.buttonStyle(.secondary).accessibilityIdentifier("cancelJournal")
+            Button("Save dream") { saveAndClose() }.buttonStyle(.primary).disabled(!saveable(draft)).accessibilityIdentifier("saveDream")
+        }.padding(.top, 8)
     }
+    // A new dream with no text is only dropped on the way out, so it counts as nothing to save, as close() treats it.
+    private func saveable(_ draft: Draft) -> Bool {
+        draft.baseRevision != 0 || draft.unconfirmed || !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    private func cancel(_ draft: Draft) {
+        if draft.unsent && saveable(draft) { confirmingClose = true } else { Task { if await model.close(app) { dismiss() } } }
+    }
+    private func saveAndClose() { Task { if await model.close(app) { dismiss() } } }
 }
