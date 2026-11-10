@@ -19,16 +19,17 @@ PROVIDER_TIMEOUT_SECONDS = 120
 MAX_TAGS = 30
 TAG_CATEGORIES = ("person", "place", "object", "action", "emotion", "theme")
 MAX_CONTEXT_MEMORIES = 20
+# Notes the user adds by hand come on top of the automatic pick, with their own limit (Re-Design list, 6 November 2026).
+MAX_ADDED_MEMORIES = 4
 MEMORY_WINDOW_DAYS = 30
-MAX_THREAD_PAIRS = 10
-TURN_MARKER_SECONDS = 300
-CONTROL_HOLD_CHARS = 40
 EMBEDDING_DIMENSIONS = 768
 MAX_EMBED_CHARS = 6000
 MAX_CANDIDATE_DISTANCE = 0.40
 # A dream whose vector is farther than this from the search wording is left out of a ranked search (cosine distance). With
 # gemini-embedding-001 on 21 October 2026, dreams that answered a search sat at 0.29–0.41 and unrelated ones at 0.43–0.55.
 SEARCH_MAX_DISTANCE = 0.42
+# A note search embeds at most this many notes without a current vector; the provider takes one text per call within one 20 s limit.
+MAX_SEARCH_EMBEDS = 10
 MAX_CANDIDATES = 10
 MAX_MATCH_CANDIDATES = 30
 GROUP_EXAMPLES = 3

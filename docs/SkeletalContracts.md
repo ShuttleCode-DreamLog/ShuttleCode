@@ -16,8 +16,6 @@ This page is the agreement between the backend and the iOS app for the Skeletal 
 | Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Implemented: "Keep out of AI processing" and the six switches on Dream Detail; "Allow AI use" on notes |
 | Recurring patterns with counts and evidence | `GET /v1/patterns` | Implemented: Patterns tab, List and Garden views |
 | Rename, dismiss, split a pattern | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Implemented: "Correct this pattern" on each finding |
-| Ask a follow-up question for a dream | `GET /v1/dreams/{id}/conversation`, `POST …/conversation/messages` (streamed), `POST …/conversation/restart` ([API.md](API.md#discussion)) | Implemented: "Conversation analysis" on Dream Detail, Start afresh |
-| Save a fact from the discussion | The reply's `offer`, then the ordinary `PUT /v1/memories/{id}` | Implemented: "Remember in profile" (and "Add to dream") on every message the user wrote, with the offer hint |
 
 ## Working agreement
 
@@ -74,7 +72,6 @@ Implemented on the server; see [API.md](API.md#summary-and-tags). The app has th
   "status": "current",
   "dream_revision": 2,
   "summary": "A night walk by a blue lake.",
-  "summary_corrected": false,
   "tags": [
     {"category": "place", "text": "blue lake", "original_text": "lake", "excerpt": "by a blue lake",
      "feeling": null, "corrected": true, "removed": false}
@@ -104,11 +101,11 @@ Implemented on the server; see [API.md](API.md#dream-permissions). The app has t
 
 `PUT /v1/dreams/{dream_id}/permissions` with any of `transcription`, `analysis`, `discussion`, `history`, `patterns`, `visuals` (booleans, each optional): 200 with `dream`. Only the fields sent change; the revision is not raised. The app's "Keep out of AI processing" control sends all six as false; turning it off sends nothing (wiki 4.5.8). The dream save keeps ignoring `permissions` after the first save.
 
-## Summary and tag corrections (wiki 4.5.3)
+## Tag corrections (wiki 4.5.3)
 
-Implemented on the server at the user's request on 15 October 2026, although the story map has no card for it; see [API.md](API.md#correcting-the-summary-and-tags). The app offers Correct summary and, per tag, Rename, Remove and Restore.
+Implemented on the server at the user's request on 15 October 2026, although the story map has no card for it; see [API.md](API.md#correcting-the-tags). The app offers, per tag, Rename, Remove and Restore. Summary corrections were removed at the user's request on 6 November 2026: the summary is only the AI's.
 
-`PUT /v1/dreams/{dream_id}/corrections` with `category` (`summary` or a tag category), `original_text` (for a tag), `text` (empty removes a tag; must not be empty for `summary`): 200 with `dream`. 409 `invalid_state` without a current organization, 400 when `original_text` matches no tag. Sending a tag's original text restores it. The story map has no card of its own for this; see open questions.
+`PUT /v1/dreams/{dream_id}/corrections` with a tag `category`, `original_text` and `text` (empty removes the tag; `summary` is refused with 400): 200 with `dream`. 409 `invalid_state` without a current organization, 400 when `original_text` matches no tag. Sending a tag's original text restores it. The story map has no card of its own for this; see open questions.
 
 ## Analysis (wiki 4.6.5)
 
@@ -187,6 +184,6 @@ Swift types (wiki 4.8.10): `PatternsResponse`, `Period`, `Finding`, `FindingExam
 ## Open questions for the team
 
 - Pattern discovery was designed as a stretch goal (wiki Arc C) and is now Skeletal. The app follows the team's user-test prototype (`DreamLog_User_Test.html`, 21 October 2026): Journal, Pattern, Add dream, Life notes and Settings tabs; the EGMUIUX exhibit (S01–S10) remains the source for what each screen must contain.
-- Summary and tag corrections have no story map card; the app offers them on Dream Detail (15 October 2026). The team may still drop them.
+- Tag corrections have no story map card; the app offers them on Dream Detail (15 October 2026). Summary corrections were dropped on 6 November 2026.
 - EGMUIUX draws Hide Pattern with a Dismissed view and Restore. The backend's dismissal (wiki 4.8.7) removes one dream from a group for good and has no restore, so the app offers "Not part of this pattern" per dream, shows dismissal notes with Remove note, and has no Dismissed view. Its Garden has no one-dream seedlings, because the server returns only groups of two or more dreams.
 - The automatic resend of queued dreams follows story map card R2 over the wiki's rule that a draft leaves the phone only on the user's tap (4.4.4, rule 2).

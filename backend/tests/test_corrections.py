@@ -32,35 +32,34 @@ async def tagged(client, headers, tag):
 async def test_requests_are_validated_and_need_a_current_organization(client, clock):
     headers, user = person()
     bare = await journal(client, headers, 'Not organized yet.')
-    assert (await correct(client, headers, bare, category='summary', text='Mine.')).status_code == 409
+    assert (await correct(client, headers, bare, category='place', original_text='lake', text='x')).status_code == 409
     dream_id = await organized_dream(client, headers, user)
     cases = [({'category': 'feeling', 'text': 'x', 'original_text': 'lake'}, 400), ({'category': 'place', 'text': 'x'}, 400),
              ({'category': 'place', 'text': 'x', 'original_text': 'river'}, 400), ({'category': 'person', 'text': 'x', 'original_text': 'lake'}, 400),
-             ({'category': 'summary', 'text': '   '}, 400), ({'category': 'place', 'text': 'x' * 61, 'original_text': 'lake'}, 413), ({'category': 'summary', 'text': 'y' * 601}, 413)]
+             ({'category': 'summary', 'text': 'Mine.'}, 400), ({'category': 'place', 'text': 'x' * 61, 'original_text': 'lake'}, 413)]
     for body, status in cases:
         response = await correct(client, headers, dream_id, **body)
         assert response.status_code == status, (body, response.text)
-    assert (await correct(client, credential(), dream_id, category='summary', text='Mine.')).status_code == 404
-    assert (await client.put(f'/v1/dreams/{dream_id}/corrections', json={'category': 'summary', 'text': 'Mine.'})).status_code == 401
+    assert (await correct(client, credential(), dream_id, category='place', original_text='lake', text='x')).status_code == 404
+    assert (await client.put(f'/v1/dreams/{dream_id}/corrections', json={'category': 'place', 'original_text': 'lake', 'text': 'x'})).status_code == 401
     assert await output_revision(dream_id) == 1
     await client.put(f'/v1/dreams/{dream_id}', headers=headers, json={'base_revision': 1, 'text': 'A new account.', 'dream_date': '2026-10-10'})
-    outdated = await correct(client, headers, dream_id, category='summary', text='Mine.')
+    outdated = await correct(client, headers, dream_id, category='place', original_text='lake', text='x')
     assert outdated.status_code == 409 and outdated.json()['error'] == 'invalid_state'
 
 
-async def test_summary_correction_repeat_and_take_back(client, clock):
+async def test_the_summary_is_only_the_ai_summary(client, clock):
     headers, user = person()
     dream_id = await organized_dream(client, headers, user)
-    indexing = len(await tasks_of('index_dream', dream_id))
-    first = await correct(client, headers, dream_id, category='summary', text='  My own summary.  ')
-    assert first.status_code == 200
-    value = first.json()['dream']['organization']
-    assert (value['summary'], value['summary_corrected'], await output_revision(dream_id)) == ('My own summary.', True, 2)
-    assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['summary'] == 'My own summary.'
-    assert (await correct(client, headers, dream_id, category='summary', text='My own summary.')).status_code == 200 and await output_revision(dream_id) == 2
-    back = (await correct(client, headers, dream_id, category='summary', text='A summary.')).json()['dream']['organization']
-    assert (back['summary'], back['summary_corrected'], await output_revision(dream_id)) == ('A summary.', False, 3)
-    assert not await db.rwdb.execute_fetchall('SELECT 1 FROM org_corrections') and len(await tasks_of('index_dream', dream_id)) == indexing
+    refused = await correct(client, headers, dream_id, category='summary', text='My own summary.')
+    assert refused.status_code == 400 and await output_revision(dream_id) == 1
+    # A summary correction stored before 6 November 2026 is no longer read anywhere.
+    output_id = (await db.rwdb.execute_fetchall("SELECT id FROM outputs WHERE dream_id=? AND type='organization'", (dream_id,)))[0][0]
+    async with db.tx() as connection:
+        await connection.execute("INSERT INTO org_corrections(output_id,category,original_text,text,user_id,updated_at) VALUES(?,'summary','',?,?,1)", (output_id, 'My own summary.', user))
+    value = (await client.get(f'/v1/dreams/{dream_id}', headers=headers)).json()['dream']['organization']
+    assert value['summary'] == 'A summary.' and 'summary_corrected' not in value
+    assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['summary'] == 'A summary.'
 
 
 async def test_tag_rename_remove_restore_and_duplicates(client, clock):
@@ -100,7 +99,9 @@ async def test_a_tag_correction_resets_its_pattern_membership_and_reindexes(clie
     response = await correct(client, headers, first, category='object', original_text='the lake', text='The frozen lake')
     assert response.status_code == 200
     assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_memberships WHERE dream_id=?', (first,))
-    assert tuple((await db.rwdb.execute_fetchall('SELECT label,description,explanation FROM pattern_groups WHERE id=?', (group_id,)))[0]) == (None, None, None)
+    # The group keeps its name and description for the member that remains; only the explanation goes until the refresh (6 November 2026).
+    group = (await db.rwdb.execute_fetchall('SELECT label,description,explanation,evidence_key FROM pattern_groups WHERE id=?', (group_id,)))[0]
+    assert group['label'] and group['description'] and group['explanation'] is None and group['evidence_key'] is None
     assert [row['status'] for row in await tasks_of('refresh_findings', user=user)][-1] == 'waiting'
     assert [row['request_key'] for row in await tasks_of('index_dream', first)][-1] == f'index_dream:{first}:1:2:test-embedding-model:768'
     await run_all()

@@ -1,7 +1,8 @@
 import SwiftUI
 
-// The prototype's capture screen: the text, then date and mood; ✓ saves and closes. The title lives in the header: the AI names
-// the dream with its summary and tags unless the user names it first. Voice capture is left out until the backend has it.
+// The prototype's capture screen: the title and text boxes, then date and mood; ✓ saves and closes. Title and text are edited
+// together, as on a life note; a title left empty is named by the AI with the summary and tags, and a title of the user's own is
+// never replaced. Voice capture is left out until the backend has it.
 struct DreamEditorView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -9,14 +10,12 @@ struct DreamEditorView: View {
     @State private var model: DreamModel
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
-    @State private var renaming = false
-    @State private var titleDraft = ""
     let newEntry: Bool
     let presented: Bool
 
     // `presented` is the editor opened over a dream's screen: it starts editing and always offers Done.
-    init(id: String, newEntry: Bool = false, presented: Bool = false, appending: String? = nil) {
-        _model = State(initialValue: DreamModel(id: id, newEntry: newEntry, editing: presented, appending: appending))
+    init(id: String, newEntry: Bool = false, presented: Bool = false) {
+        _model = State(initialValue: DreamModel(id: id, newEntry: newEntry, editing: presented))
         self.newEntry = newEntry
         self.presented = presented
     }
@@ -28,7 +27,11 @@ struct DreamEditorView: View {
                 if let draft = model.draft {
                     if model.isEditing { capture(draft) }
                     else if let dream = model.dream {
-                        Hint([displayDate(dream.dreamDate), dream.mood.map { $0.rawValue.capitalized }].compactMap(\.self).joined(separator: " · "))
+                        HStack(alignment: .firstTextBaseline) {
+                            Hint([displayDate(dream.dreamDate), dream.mood.map { $0.rawValue.capitalized }].compactMap(\.self).joined(separator: " · "))
+                            Spacer()
+                            Button("Edit", systemImage: "pencil") { model.isEditing = true }.buttonStyle(.secondary)
+                        }
                         Text(dream.text).font(.callout).textSelection(.enabled)
                     }
                 } else if !model.isLoading {
@@ -41,11 +44,6 @@ struct DreamEditorView: View {
         .dreamPage()
         .page(header, aboveBar: false)
         .disabled(model.isSending)
-        .alert("Dream title", isPresented: $renaming) {
-            TextField("Dream title", text: $titleDraft)
-            Button("Save") { let value = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines); model.change(app) { $0.title = value.isEmpty ? nil : value } }
-            Button("Cancel", role: .cancel) {}
-        }
         .confirmationDialog("Delete this journal entry and any draft on this phone? This cannot be undone.", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete entry", role: .destructive) { Task { await model.delete(app); if model.deleted { dismiss() } } }
         }
@@ -62,7 +60,7 @@ struct DreamEditorView: View {
     private var title: String { model.draft?.title?.isEmpty == false ? model.draft!.title! : newEntry ? "New dream" : "Dream" }
     @ViewBuilder private var header: some View {
         if model.isEditing {
-            Header(title, onTitle: { titleDraft = model.draft?.title ?? ""; renaming = true }) {
+            Header(title) {
                 BackButton { Task { if await model.close(app) { dismiss() } } }
             } trailing: {
                 if model.isSending { ProgressView() } else {
@@ -83,15 +81,17 @@ struct DreamEditorView: View {
         } else {
             Header(title) {
                 if newEntry || presented { BackButton(label: "Done") { dismiss() } } else { BackButton() }
-            } trailing: {
-                if model.dream != nil { Button("Edit") { model.isEditing = true }.buttonStyle(.quiet) }
-            }
+            } trailing: { EmptyView() }
         }
     }
 
     @ViewBuilder private func capture(_ draft: Draft) -> some View {
         Eyebrow("Capture before it fades")
         Text("What do you remember?").font(.display)
+        TextField("Title (optional)", text: Binding(get: { model.draft?.title ?? "" }, set: { value in
+            model.change(app) { $0.title = value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value }
+        }))
+        .font(.heading).field().accessibilityIdentifier("dreamTitle")
         TextEditor(text: Binding(get: { model.draft?.text ?? "" }, set: { value in model.change(app) { $0.text = value } }))
             .font(.callout).scrollContentBackground(.hidden)
             .frame(minHeight: 240).fixedSize(horizontal: false, vertical: true)

@@ -24,6 +24,8 @@ final class AppModel {
     var homeVisits = 0
     // The bar's + and Type a dream present this editor over the screen.
     var newDream: EntryRoute?
+    // The bar's + on Life notes and the page's Add note present a new note editor.
+    var newNote: EntryRoute?
     // The drawn bar's height: its safe-area inset does not reach the pages inside a NavigationStack, so they add it as a margin.
     var barHeight: CGFloat = 0
     // Raised when the app returns to the foreground, the connection returns or the editor over the tabs closes; open screens run load() on it (wiki 4.4.6).
@@ -200,10 +202,7 @@ final class AppModel {
         ready = false
         await start()
     }
-    // Offer hints that were taken or dismissed stay hidden, also after a restart; whole-journal deletion clears them (wiki 4.6.7).
-    var answeredOffers: Set<String> { Set(defaults.stringArray(forKey: answeredOffersKey) ?? []) }
-    func answerOffer(_ replyId: String) { defaults.set(Array(answeredOffers.union([replyId])), forKey: answeredOffersKey) }
     private func clearDefaults() {
-        for key in [noticeKey, noticeContentKey, reminderKey, answeredOffersKey] { defaults.removeObject(forKey: key) }
+        for key in [noticeKey, noticeContentKey, reminderKey, answeredOffersKey, dreamSectionOrderKey] { defaults.removeObject(forKey: key) }
     }
 }

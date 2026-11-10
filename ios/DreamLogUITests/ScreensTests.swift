@@ -50,13 +50,9 @@ final class ScreensTests: XCTestCase {
         app.buttons["tab_journal"].tap()
         for (title, text) in samples where !app.staticTexts[title].waitForExistence(timeout: 3) {
             app.buttons["tab_add"].tap()
-            let titleButton = app.buttons["dreamTitle"]
-            XCTAssertTrue(titleButton.waitForExistence(timeout: 5))
-            titleButton.tap()
-            let titleField = app.alerts.textFields.firstMatch
-            XCTAssertTrue(titleField.waitForExistence(timeout: 3))
-            titleField.typeText(title)
-            app.alerts.buttons["Save"].tap()
+            let titleField = app.textFields["dreamTitle"]
+            XCTAssertTrue(titleField.waitForExistence(timeout: 5))
+            titleField.tap(); titleField.typeText(title)
             let body = app.textViews["journalText"]
             body.tap(); body.typeText(text)
             app.buttons["Done"].tap()

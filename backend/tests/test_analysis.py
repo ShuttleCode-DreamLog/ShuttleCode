@@ -135,7 +135,7 @@ async def test_analyze_saves_checked_sections_and_sources(client, clock, gemini)
     headers, user, dream_id = await journal(client, mood='anxious')
     desc = await organized(user, dream_id)
     clock['ms'] = NOON - 2 * DAY
-    memory_id = await note(client, headers, 'Exam deadline at the station office.', event_date='2026-10-08')
+    memory_id = await note(client, headers, 'Exam deadline at the station office.', event_date='2026-10-08', title='Exam week')
     await journal(client, text='A train stopped at a frozen lake.', headers=headers, dream_date='2026-09-30')
     clock['ms'] = NOON
     gemini.answers.append({'sections': [
@@ -165,6 +165,7 @@ async def test_analyze_saves_checked_sections_and_sources(client, clock, gemini)
     body = (await client.get(f'/v1/dreams/{dream_id}/analysis', headers=headers)).json()
     assert [entry['label'] for entry in body['analysis']['context']] == ['DREAM', 'DESC', 'M1']
     assert all(entry['available'] for entry in body['analysis']['context']) and body['task']['status'] == 'completed' and body['analysis']['removed_sources'] == 0
+    assert [entry['title'] for entry in body['analysis']['context'] if entry['kind'] == 'memory'] == ['Exam week']
     assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['status'] == 'ready'
 
 
@@ -357,3 +358,83 @@ async def test_date_or_mood_changes_outdate_the_analysis(client, clock, gemini):
     await client.put(f'/v1/dreams/{own}', headers=headers, json={'base_revision': 1, 'text': TEXT, 'dream_date': '2026-10-10', 'mood': 'sad'})
     assert (await client.get(f'/v1/dreams/{own}/analysis', headers=headers)).json()['analysis']['status'] == 'outdated'
     assert len(await stored(own)) == 1
+
+
+async def test_added_and_removed_notes_shape_the_next_analysis(client, clock, gemini):
+    headers, user, dream_id = await journal(client)
+    await organized(user, dream_id)
+    picked = await note(client, headers, 'Waiting for the train at the station.', event_date='2026-10-09', title='Station')
+    hidden = await note(client, headers, 'Kept private.', allow_analysis=False)
+    gemini.answers.append({'sections': BASE})
+    assert await tasks.run_once()
+    # Written after the analysis ran, with no shared words and outside the window, so only adding them brings them in.
+    unrelated = await note(client, headers, 'Baked bread with grandma.', event_date='2026-08-01', title='Bread')
+    later = await note(client, headers, 'Moved apartments.', event_date='2026-11-01')
+    path = f'/v1/dreams/{dream_id}/analysis/notes'
+    first = (await client.get(f'/v1/dreams/{dream_id}/analysis', headers=headers)).json()['analysis']
+    automatic = [entry['source_id'] for entry in first['context'] if entry['kind'] == 'memory']
+    assert picked in automatic and hidden not in automatic and all(entry['choice'] is None for entry in first['context'] if entry['kind'] == 'memory') and first['pending_notes'] == []
+
+    added = await client.put(f'{path}/{unrelated}', headers=headers, json={'choice': 'added'})
+    assert added.status_code == 200 and added.json()['analysis']['status'] == 'outdated'
+    assert added.json()['analysis']['pending_notes'] == [{'source_id': unrelated, 'title': 'Bread', 'source_date': '2026-08-01'}]
+    clock['ms'] += 1000
+    await client.put(f'{path}/{later}', headers=headers, json={'choice': 'added'})
+    removed = (await client.put(f'{path}/{picked}', headers=headers, json={'choice': 'removed'})).json()['analysis']
+    assert [entry['choice'] for entry in removed['context'] if entry['source_id'] == picked] == ['removed']
+    assert (await client.put(f'{path}/{hidden}', headers=headers, json={'choice': 'added'})).status_code == 409
+    assert (await client.put(f'{path}/{unrelated}', headers=headers, json={'choice': 'kept'})).status_code == 400
+
+    # Added notes come first and skip the date and match rules; the removed one is never picked again.
+    chosen = [(source['label'], source['source_id']) for source in await context(dream_id) if source['kind'] == 'memory']
+    assert chosen[:2] == [('M1', unrelated), ('M2', later)] and picked not in [memory_id for _, memory_id in chosen]
+    assert [source['label'] for source in await context(dream_id, use_history=0)] == ['DESC']
+    assert (await client.delete(f'{path}/{picked}', headers=headers)).status_code == 200
+    assert picked in [source['source_id'] for source in await context(dream_id) if source['kind'] == 'memory'][2:]
+
+    # Repeating a choice changes nothing; the analysis keeps its status.
+    async with db.tx() as connection:
+        await connection.execute("UPDATE outputs SET status='current' WHERE dream_id=?", (dream_id,))
+    assert (await client.put(f'{path}/{unrelated}', headers=headers, json={'choice': 'added'})).json()['analysis']['status'] == 'current'
+
+    # With the history switch off nothing is pending, because no note is sent.
+    await client.put('/v1/me', headers=headers, json={'use_history': False})
+    assert (await client.get(f'/v1/dreams/{dream_id}/analysis', headers=headers)).json()['analysis']['pending_notes'] == []
+
+
+async def test_note_choices_check_ownership_limits_and_switches(client, clock, gemini, monkeypatch):
+    headers, user, dream_id = await journal(client)
+    other_headers, _, other_dream = await journal(client, headers=credential())
+    mine = await note(client, headers, 'Mine.')
+    theirs = await note(client, other_headers, 'Theirs.')
+    path = f'/v1/dreams/{dream_id}/analysis/notes'
+    assert (await client.put(f'{path}/{theirs}', headers=headers, json={'choice': 'added'})).status_code == 404
+    assert (await client.put(f'/v1/dreams/{other_dream}/analysis/notes/{mine}', headers=headers, json={'choice': 'added'})).status_code == 404
+    monkeypatch.setattr(config, 'MAX_ADDED_MEMORIES', 2)
+    extra = [await note(client, headers, f'Note {n}.') for n in range(3)]
+    for memory_id in extra[:2]:
+        assert (await client.put(f'{path}/{memory_id}', headers=headers, json={'choice': 'added'})).status_code == 200
+    full = await client.put(f'{path}/{extra[2]}', headers=headers, json={'choice': 'added'})
+    assert full.status_code == 409 and full.json()['error'] == 'too_many'
+    # A note kept out of AI processing after it was added no longer counts toward the limit.
+    revision = (await db.rwdb.execute_fetchall('SELECT revision FROM memories WHERE id=?', (extra[0],)))[0][0]
+    assert (await client.put(f'/v1/memories/{extra[0]}', headers=headers, json={'base_revision': revision, 'text': 'Note 0.', 'allow_analysis': False})).status_code == 200
+    assert (await client.put(f'{path}/{extra[2]}', headers=headers, json={'choice': 'added'})).status_code == 200
+    assert (await client.delete(f'/v1/memories/{extra[1]}', headers=headers)).status_code in (200, 204)
+    assert not await db.rwdb.execute_fetchall('SELECT 1 FROM analysis_note_choices WHERE memory_id=?', (extra[1],))
+    await client.put(f'/v1/dreams/{dream_id}/permissions', headers=headers, json={'analysis': False})
+    assert (await client.put(f'{path}/{mine}', headers=headers, json={'choice': 'added'})).status_code == 403
+
+
+async def test_a_choice_made_while_analysis_runs_waits_for_the_next_update(client, clock, gemini):
+    headers, user, dream_id = await journal(client)
+    await organized(user, dream_id)
+    added = await note(client, headers, 'Unrelated baking.')
+    async def answer():
+        assert (await client.put(f'/v1/dreams/{dream_id}/analysis/notes/{added}', headers=headers, json={'choice': 'added'})).status_code in (200, 403)
+        return {'sections': BASE}
+    gemini.answers.append(answer)
+    assert await tasks.run_once()
+    assert (await analyze_task(dream_id))['status'] == 'completed' and len(gemini.calls) == 1
+    [output] = await stored(dream_id)
+    assert output['status'] == 'outdated'

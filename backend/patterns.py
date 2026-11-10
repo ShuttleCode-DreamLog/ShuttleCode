@@ -18,7 +18,7 @@ from web import RequestError, check_id, json_response, read_body, resolve_user
 
 logger = logging.getLogger('dreamlog')
 MATCH_VERSION = 'match-1'
-FINDINGS_VERSION = 'findings-1'
+FINDINGS_VERSION = 'findings-2'
 MATCH_INSTRUCTION = ("Compare these original excerpts with the candidate group's description and examples. Identify a specific shared element and any important difference. "
                      'Do not match on a broad mood or common noun alone, and do not assume unnamed people share an identity. Keep weak connections separate. '
                      'Suggest a descriptive label rather than a personality explanation. Respect stored rejected matches and corrections. '
@@ -29,8 +29,10 @@ MATCH_INSTRUCTION = ("Compare these original excerpts with the candidate group's
                      'the new group then holds both, and label and description name the group. For none, target is an empty string. Use an empty string for any other field that does not apply.')
 FINDINGS_INSTRUCTION = ('For each group, describe what the supplied excerpts have in common as a descriptive theme, not a personality explanation. '
                         'State the supplied number of supporting dreams in digits, exactly as given, and call them recorded dreams. Write no other number and quote no number from an excerpt. '
-                        'Give no date. Make no claim about how often the user dreams or what it means. Write in the language of the excerpts, never mentioning the labels G1 or E1 in any text. '
-                        'When a group asks for member texts, give one member per piece of evidence E with its shared element and an important difference, or an empty difference.')
+                        'Give no date. Make no claim about how often the user dreams or what it means. '
+                        'Write label, description, explanation, shared elements and differences in the language of the excerpts, as plain text for the dreamer, never mentioning the labels G1 or E1 in them. '
+                        'The labels belong in the fields that name things: in each entry, group is that group\'s G label (G1, G2, ...). '
+                        'When a group asks for member texts, give one member per piece of evidence, with evidence set to that piece\'s E label (E1, E2, ...), its shared element and an important difference, or an empty difference.')
 NULLABLE = {'type': 'string'}
 MATCH_SCHEMA = {'type': 'object', 'required': ['decisions'], 'properties': {'decisions': {'type': 'array', 'items': {'type': 'object', 'required': ['occurrence', 'action', 'target', 'shared_element', 'difference', 'label', 'description'],
                 'properties': {'occurrence': {'type': 'string'}, 'action': {'type': 'string', 'enum': ['join', 'new_group', 'none']}, 'target': NULLABLE, 'shared_element': NULLABLE, 'difference': NULLABLE, 'label': NULLABLE, 'description': NULLABLE}}}}}
@@ -104,9 +106,11 @@ def key_state(task):
 
 
 async def clear_group_texts(connection, group_id):
-    # Words the AI wrote from evidence that has left the group must go with it at once; the user's own label stays (wiki 4.8.6).
-    await connection.execute('UPDATE pattern_groups SET label=NULL,description=NULL,explanation=NULL,evidence_key=NULL,tried_key=NULL,updated_at=? WHERE id=?', (config.now(), group_id))
-    await connection.execute('UPDATE pattern_memberships SET shared_element=NULL,difference=NULL WHERE group_id=?', (group_id,))
+    # The explanation states a count and is written for one set of evidence, so it goes and is hidden while the finding refreshes. The label,
+    # description and member texts are generalisations that still describe the members that remain, so they stay until the next refresh
+    # replaces them and the user never meets a nameless pattern (6 November 2026; until then they were emptied too, and a refresh that
+    # failed left the group without any name). The user's own label stays (wiki 4.8.6).
+    await connection.execute('UPDATE pattern_groups SET explanation=NULL,evidence_key=NULL,tried_key=NULL,updated_at=? WHERE id=?', (config.now(), group_id))
 
 
 async def clear_dream_groups(connection, dream_id):
@@ -349,15 +353,34 @@ def findings_content(groups, states):
     return '\n\n'.join(blocks), evidence
 
 
+def named_label(value, prefix, known):
+    # The model is asked for a bare label; one wrapped in other words still names it.
+    if value in known:
+        return value
+    found = re.search(rf'\b{prefix}(\d+)\b', value or '')
+    return f'{prefix}{found.group(1)}' if found else value
+
+
+def evidence_label(value, pieces):
+    # findings-1 forbade the labels in any text without saying where they belong, and the model quoted the excerpt as evidence instead, so no
+    # cleared group was ever named again; a quote of the piece's excerpt or description still names it.
+    name = named_label(value, 'E', pieces)
+    if name in pieces:
+        return name
+    quoted = ' '.join((value or '').lower().split())
+    return next((label for label, piece in pieces.items() if quoted in {' '.join(piece[key].lower().split()) for key in ('excerpt', 'description')}), value)
+
+
 def judged(answer, groups, states, evidence):
     labels = {f'G{number}': group for number, group in enumerate(groups, 1)}
     results = {}
     for entry in (answer.groups if answer else []):
-        group = labels.get(entry.group)
+        group = labels.get(named_label(entry.group, 'G', labels))
         if group is None or group['id'] in results:
             continue
         label, description, explanation = filled(entry.label), filled(entry.description), filled(entry.explanation)
-        members = {member.evidence: member for member in entry.members if filled(member.shared_element)}
+        pieces = evidence[group['id']]
+        members = {evidence_label(member.evidence, pieces): member for member in entry.members if filled(member.shared_element)}
         if not label or not description or not explanation or len(label) > config.LIMITS['max_label_chars'] or (not group['label'] and set(evidence[group['id']]) - set(members)):
             continue
         # The model describes the count; it never decides it (wiki 4.8.6, check 2).

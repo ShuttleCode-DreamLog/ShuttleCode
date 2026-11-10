@@ -46,6 +46,49 @@ extension FoundationTests {
         #expect(paths == ["/v1/memories/\(id)", "/v1/memories/\(id)/photos/\(photoID)", "/v1/memories/\(id)", "/v1/memories/\(id)/photos/\(photoID)"])
         await closeJournalApp(app)
     }
+    @Test func noteSearchKeepsItsQueryThroughLoadMore() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let memory = try #require(JSONSerialization.jsonObject(with: memoryResponse(id: newID())) as? [String: Any])["memory"]!
+        let page = { (more: Bool) in try JSONSerialization.data(withJSONObject: ["items": [memory], "has_more": more, "ranked": true]) }
+        let model = NotesModel()
+        model.query = "exam week"
+        enqueue([(200, try page(true))])
+        await model.load(app)
+        enqueue([(200, try page(false))])
+        await model.load(app, more: true)
+        let requests = BackendProtocol.state.withLock { $0.requests }
+        #expect(requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" } == ["POST /v1/memories/search", "POST /v1/memories/search"])
+        #expect(requests.map { sentBody($0)?["query"] as? String } == ["exam week", "exam week"])
+        #expect(URLComponents(url: requests.last!.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "offset" }?.value == "1")
+        #expect(model.ranked)
+        await closeJournalApp(app)
+    }
+    @Test func analysisNoteChoicesSendPutOrDeleteAndShowTheReturnedAnalysis() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let dreamID = newID(), picked = newID(), added = newID()
+        let body = { (choice: Any) in try JSONSerialization.data(withJSONObject: ["analysis": [
+            "id": "o1", "status": "outdated", "dream_revision": 1, "sections": [], "withheld": 0, "removed_sources": 0, "dream_date": "2026-10-15",
+            "mood": NSNull(), "model": "m", "instruction_version": "analyze-1", "created_at": 1760371200000,
+            "context": [["label": "M1", "kind": "memory", "source_id": picked, "source_revision": 1, "source_date": NSNull(), "available": true, "cut_to": NSNull(), "title": "Station", "choice": choice]],
+            "pending_notes": [["source_id": added, "title": NSNull(), "source_date": "2026-10-13"]]], "task": NSNull()]) }
+        let model = AnalysisModel(dreamId: dreamID)
+        enqueue([(200, try body("removed"))])
+        await model.choose(app, memory: picked, choice: "removed")
+        #expect(model.analysis?.context.first?.choice == "removed" && model.analysis?.pendingNotes?.first?.name == "Life note · \(displayDate("2026-10-13"))")
+        enqueue([(200, try body(NSNull()))])
+        await model.choose(app, memory: picked, choice: nil)
+        #expect(model.analysis?.context.first?.choice == nil && model.error == nil && !model.isSending)
+        let requests = BackendProtocol.state.withLock { $0.requests }
+        #expect(requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" } == ["PUT /v1/dreams/\(dreamID)/analysis/notes/\(picked)", "DELETE /v1/dreams/\(dreamID)/analysis/notes/\(picked)"])
+        #expect(sentBody(requests[0])?["choice"] as? String == "removed")
+        await closeJournalApp(app)
+    }
+    @Test func dreamSectionOrderFallsBackForUnknownMissingAndRepeatedNames() {
+        #expect(dreamSections("") == DreamSection.allCases)
+        #expect(dreamSections("analysis,bogus,analysis,tags") == [.analysis, .tags, .originalText, .summary])
+    }
     func memoryResponse(id: String, text: String = "Sample life note.", revision: Int = 1) throws -> Data {
         let memory = Memory(id: id, text: text, recordedAt: .now, eventPrecision: .unknown, isOngoing: false, allowAnalysis: true, revision: revision, updatedAt: .now)
         let encoder = JSONEncoder()

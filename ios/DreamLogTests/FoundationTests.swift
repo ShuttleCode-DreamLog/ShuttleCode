@@ -107,6 +107,7 @@ struct FoundationTests {
         let first = try identity.create().get()
         defaults.set(noticeVersion - 1, forKey: noticeKey)
         defaults.set(noticeFingerprint, forKey: noticeContentKey)
+        defaults.set("analysis,tags", forKey: dreamSectionOrderKey)
         let model = AppModel(defaults: defaults, identity: identity, folder: folder, configuration: config)
         await model.start()
         #expect(model.ready && !model.noticeSeen && model.hasPriorAcknowledgment)
@@ -116,7 +117,7 @@ struct FoundationTests {
         #expect(model.ready && !model.noticeSeen && !model.hasPriorAcknowledgment)
         #expect(try identity.read().get() != first)
         #expect(!defaults.bool(forKey: deletionKey))
-        #expect(defaults.object(forKey: noticeContentKey) == nil)
+        #expect(defaults.object(forKey: noticeContentKey) == nil && defaults.object(forKey: dreamSectionOrderKey) == nil)
         #expect(BackendProtocol.state.withLock { $0.requests.map(\.httpMethod) } == ["DELETE"])
         if let client = model.client { await client.cancelAndWait() }
         _ = await model.store.deleteEverything()

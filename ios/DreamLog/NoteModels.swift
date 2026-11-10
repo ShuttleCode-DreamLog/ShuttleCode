@@ -30,7 +30,7 @@ nonisolated struct Memory: Codable, Identifiable {
     var photos: [NotePhoto] = []
 }
 
-nonisolated struct MemoryPage: Decodable { var items: [Memory]; var hasMore: Bool }
+nonisolated struct MemoryPage: Decodable { var items: [Memory]; var hasMore: Bool; var ranked: Bool? }
 nonisolated struct MemoryResponse: Decodable { var memory: Memory }
 nonisolated struct MemorySave: Encodable {
     var baseRevision: Int = 0
@@ -64,18 +64,20 @@ final class NotesModel {
     var hasMore = false
     var isLoading = false
     var error: String?
+    var query = ""
+    var ranked = false
     func load(_ app: AppModel, more: Bool = false) async {
         guard app.noticeSeen, !app.deleting, !isLoading, let client = app.client else { return }
         isLoading = true
         defer { isLoading = false }
         let epoch = app.journalEpoch
-        let result = await client.loadMemories(offset: more ? items.count : 0)
+        let result = await client.loadMemories(offset: more ? items.count : 0, query: query)
         guard epoch == app.journalEpoch, !app.deleting else { return }
         switch result {
         case let .success(page):
             let ids = Set(items.map(\.id))
             items = more ? items + page.items.filter { !ids.contains($0.id) } : page.items
-            hasMore = page.hasMore; error = nil
+            hasMore = page.hasMore; ranked = page.ranked ?? false; error = nil
         case let .failure(failure): error = failure.message
         }
     }
@@ -98,8 +100,7 @@ final class NoteEditorModel {
     var pendingPhotos: [PendingPhoto] = []
     var photoContent: [String: Data] = [:]
     var isAddingPhotos = false
-    // `text` starts a new note from a message the user wrote in a discussion (Remember in profile, wiki 4.6.6, rule 2).
-    init(id: String, newEntry: Bool = false, text: String = "") { self.id = id; self.newEntry = newEntry; isEditing = newEntry; value.text = text }
+    init(id: String, newEntry: Bool = false) { self.id = id; self.newEntry = newEntry; isEditing = newEntry }
     private func current(_ app: AppModel) -> Bool { epoch == app.journalEpoch && app.noticeSeen && !app.deleting }
     var hasChanges: Bool {
         if !pendingPhotos.isEmpty { return true }

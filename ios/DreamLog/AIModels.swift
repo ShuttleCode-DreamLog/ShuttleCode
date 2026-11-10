@@ -29,6 +29,8 @@ nonisolated struct ContextEntry: Codable, Sendable, Identifiable {
     var sourceDate: String?
     var available: Bool
     var cutTo: Int?
+    var title: String?
+    var choice: String?
     var id: String { label }
     // Labels are never shown to the user (wiki 4.6.7, analysis logic 4).
     var name: String {
@@ -38,7 +40,8 @@ nonisolated struct ContextEntry: Codable, Sendable, Identifiable {
         case (.dream, _): "Dream\(date)"
         case (.output, "ANALYSIS"): "This dream's analysis"
         case (.output, _): "This dream's summary and tags"
-        case (.memory, _): "Life note\(date)"
+        // A note is named by its title so untitled and undated notes are the only ones left as "Life note" (Re-Design list, 6 November 2026).
+        case (.memory, _): "\(title ?? "Life note")\(date)"
         case (.notes, _): "Your correction notes"
         case (.unknown, _): "Source"
         }
@@ -52,6 +55,7 @@ nonisolated struct Analysis: Codable, Sendable {
     var sections: [AnalysisSection]
     var withheld: Int
     var context: [ContextEntry]
+    var pendingNotes: [PendingNote]?
     var removedSources: Int
     var dreamDate: String
     var mood: Mood?
@@ -64,6 +68,15 @@ nonisolated struct Analysis: Codable, Sendable {
     func sources(of section: AnalysisSection) -> [String] {
         section.citations.map { label in context.first { $0.label == label }?.name ?? "A source that has since changed" }
     }
+}
+
+// A note the user added that joins the analysis on the next Update Analysis (Re-Design list, 6 November 2026).
+nonisolated struct PendingNote: Codable, Sendable, Identifiable {
+    var sourceId: String
+    var title: String?
+    var sourceDate: String?
+    var id: String { sourceId }
+    var name: String { (title ?? "Life note") + (sourceDate.map { " · \(displayDate($0))" } ?? "") }
 }
 
 nonisolated struct AnalysisResponse: Decodable { var analysis: Analysis?; var task: TaskInfo? }
@@ -157,80 +170,5 @@ func failureText(_ code: String?, _ type: TaskType) -> String {
     case ("provider_refused", .analyze): "The AI service did not accept this dream for an analysis. The dream is saved unchanged."
     case ("provider_refused", .matchPatterns): "The AI service did not accept this dream for a comparison with your other dreams. The dream is saved unchanged and can be read and edited."
     default: "The work could not be completed."
-    }
-}
-
-nonisolated enum MessageRole: String, Codable, Sendable {
-    case user, assistant, unknown
-    init(from decoder: any Decoder) throws { self = MessageRole(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
-}
-
-nonisolated enum MessageState: String, Codable, Sendable {
-    case ok, stale, unknown
-    init(from decoder: any Decoder) throws { self = MessageState(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
-}
-
-// A hint from the model only: both actions are on every message the user wrote, whatever it said (wiki 4.6.6, rule 3).
-nonisolated enum Offer: String, Codable, Sendable {
-    case addToDream = "add_to_dream", rememberInProfile = "remember_in_profile", unknown
-    init(from decoder: any Decoder) throws { self = Offer(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
-}
-
-nonisolated struct Message: Codable, Sendable, Identifiable {
-    var id: String
-    var seq: Int
-    var role: MessageRole
-    var text: String
-    var state: MessageState
-    var replyTo: String?
-    var offer: Offer?
-    var context: [ContextEntry]
-    var createdAt: Date
-}
-
-nonisolated struct Correction: Codable, Sendable, Identifiable {
-    var id: String
-    var messageId: String?
-    var section: SectionKind?
-    var outputId: String?
-    var note: String
-    var createdAt: Date
-}
-
-nonisolated struct Conversation: Codable, Sendable {
-    var dreamId: String
-    var goal: String?
-    var messages: [Message]
-    var corrections: [Correction]
-    var analysisWithheld: Bool
-}
-
-nonisolated struct ConversationResponse: Decodable { var conversation: Conversation }
-nonisolated struct TurnRequest: Encodable { var messageId: String; var text: String }
-nonisolated struct TurnStart: Decodable { var contextRestarted: Bool }
-nonisolated struct TurnDelta: Decodable { var text: String }
-nonisolated struct TurnDone: Codable, Sendable { var userMessage: Message; var message: Message }
-
-// The events of one streamed turn (wiki 4.2.5); a stream that closes before `done` or `error` arrives as `failed(.interrupted)`.
-nonisolated enum TurnEvent: Sendable {
-    case start(contextRestarted: Bool)
-    case delta(String)
-    case done(TurnDone)
-    case failed(APIError)
-}
-
-nonisolated enum PendingState: Sendable { case sending, failed, stillWorking }
-nonisolated struct PendingTurn: Sendable { var messageId: String; var text: String; var state: PendingState }
-
-// Shown under every reply that did not arrive, whatever the reason, because the app cannot know what the message said (wiki 4.4.6).
-let dangerLine = "If you wrote about being in danger or about harming yourself: DreamLog cannot help with that. Please contact your local emergency services or someone you trust."
-
-func turnFailureText(_ error: APIError) -> String {
-    switch error.code {
-    case "cap_reached", "ceiling_reached", "rate_limited": failureText(error.code, .analyze)
-    case "provider_refused": "The AI service did not answer this message. Your message is kept, and you can write another."
-    case "context_changed": "The dream or its context changed while the reply was written. Request it again."
-    case "not_permitted": "Discussion is off for this dream."
-    default: error == .interrupted ? "The reply was interrupted." : error.message
     }
 }
