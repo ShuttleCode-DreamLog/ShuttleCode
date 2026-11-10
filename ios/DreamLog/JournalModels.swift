@@ -95,7 +95,7 @@ nonisolated struct Organization: Codable, Sendable {
     var status: OutputStatus
     var dreamRevision: Int
     var summary: String
-    var summaryCorrected: Bool
+    var summaryCorrected: Bool?
     var tags: [Tag]
     var createdAt: Date
 }

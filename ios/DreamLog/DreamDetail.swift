@@ -309,7 +309,7 @@ struct DreamDetailView: View {
             if let organization = dream.organization {
                 if organization.status != .current { Hint("Outdated after an edit") }
                 Text(organization.summary).font(.callout)
-                if organization.summaryCorrected { Hint("Your correction") }
+                if organization.summaryCorrected == true { Hint("Your correction") }
                 if organization.status == .current {
                     Button("Correct summary") { correctionText = organization.summary; correcting = .summary }.buttonStyle(.quiet)
                 }

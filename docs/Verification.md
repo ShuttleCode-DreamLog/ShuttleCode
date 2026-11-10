@@ -223,3 +223,5 @@ Disabling parallel simulator clones ensures the network test uses the simulator 
 - Merged `origin/main` at `b41b5c2` into `feature/manual-tag-library`; retained the folding/reorderable detail sections and placed main's Conversation analysis entry inside Analysis.
 - Backend: **218 passed**. Debug simulator unit tests: **44 passed**; the optional HTTPS integration suite remained skipped. Release simulator build: **succeeded**.
 - Debug and Release endpoint settings remain local and course-server respectively. No remote deployment or live Release API verification performed.
+
+- Release compatibility: tolerate an absent `organization.summary_corrected` field from the AI-only-summary backend. Release unit tests with command-line `ENABLE_TESTABILITY=YES`: **45 passed**, including absent/false/true summary flag cases. Live server version could not be confirmed because SSH host-key verification failed.

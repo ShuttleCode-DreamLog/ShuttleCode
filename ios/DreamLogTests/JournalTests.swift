@@ -3,6 +3,26 @@ import Testing
 @testable import DreamLog
 
 extension FoundationTests {
+    @Test(arguments: [nil, false, true] as [Bool?])
+    func dreamLoadsWithOptionalSummaryCorrectionFlag(_ corrected: Bool?) async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let id = newID()
+        var payload = try #require(JSONSerialization.jsonObject(with: dreamResponse(journalDream(id: id))) as? [String: Any])
+        var dream = try #require(payload["dream"] as? [String: Any])
+        var organization: [String: Any] = ["status": "current", "dream_revision": 1, "summary": "An invented summary.", "tags": [], "created_at": 1000]
+        if let corrected { organization["summary_corrected"] = corrected }
+        dream["organization"] = organization
+        payload["dream"] = dream
+        enqueue([(200, try JSONSerialization.data(withJSONObject: payload))])
+        let model = DreamModel(id: id)
+        await model.load(app)
+        #expect(model.error == nil)
+        #expect(model.dream?.organization?.summary == "An invented summary.")
+        #expect(model.dream?.organization?.summaryCorrected == corrected)
+        await closeJournalApp(app)
+    }
+
     @Test func closingJournalSavesAutomaticallyAndRevertDiscardsChanges() async throws {
         let (app, identity, defaults, namespace) = try await journalApp()
         defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
