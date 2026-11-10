@@ -31,11 +31,16 @@ def wrap_account(text):
 
 
 def failure(status, body, model):
+    global credential
     # A refused key answers 400 and an exhausted prepaid balance 402 at this endpoint (trial calls, 15 October 2026); like 401/403/404 they are set-up faults the operator fixes.
     category = ("provider_config" if status in (401, 402, 403, 404) or (status == 400 and "api key" in body.lower())
                 else "rate_limited" if status == 429 else "provider_unavailable" if status >= 500 else "provider_rejected")
     if category == "provider_config":
         logger.error("provider_config status=%s model=%s", status, model)
+    # gcloud hands out its cached token, which can expire well inside the hour assumed below (10 November 2026), and a revoked
+    # token would otherwise be sent until then; dropping a refused one makes the next attempt mint another.
+    if status == 401:
+        credential = ("", 0.0)
     return ProviderError(category, category != "provider_rejected")
 
 
