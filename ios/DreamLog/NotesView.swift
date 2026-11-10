@@ -35,6 +35,14 @@ struct NotesView: View {
             .page(Header("Life notes") { HomeButton() })
             .navigationDestination(for: String.self) { NoteEditorView(id: $0) }
             .task { await model.load(app) }
+            // A note left untitled shows the title the server writes by itself, as Journal cards do (wiki 4.4.6, rule 3).
+            .task(id: awaitingTitles) {
+                var pause = 2
+                while awaitingTitles, (try? await Task.sleep(for: .seconds(pause))) != nil {
+                    await model.load(app)
+                    pause = min(pause * 2, 15)
+                }
+            }
             .reloadable { await model.load(app) }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await model.load(app) } } }
             .onChange(of: app.refreshes) { Task { await model.load(app) } }
@@ -52,6 +60,7 @@ struct NotesView: View {
         model.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         Task { await model.load(app) }
     }
+    private var awaitingTitles: Bool { path.isEmpty && app.newNote == nil && model.items.contains { $0.titlePending == true } }
     private var countLine: String {
         let count = model.items.count
         let entries = "\(count)\(model.hasMore ? "+" : "") \(count == 1 ? "note" : "notes")"
@@ -155,6 +164,13 @@ struct NoteEditorView: View {
         .page(header, aboveBar: !newEntry)
         .disabled(model.isSending)
         .task { await model.load(app) }
+        .task(id: awaitingTitle) {
+            var pause = 2
+            while awaitingTitle, (try? await Task.sleep(for: .seconds(pause))) != nil {
+                await model.load(app)
+                pause = min(pause * 2, 15)
+            }
+        }
         .interactiveDismissDisabled(model.hasChanges || model.isSending || model.isAddingPhotos)
         .onChange(of: selectedPhotos) { _, items in
             if !items.isEmpty { Task { await model.addPhotos(items, app: app); selectedPhotos = [] } }
@@ -280,6 +296,7 @@ struct NoteEditorView: View {
             }
         }
     }
+    private var awaitingTitle: Bool { !model.isEditing && model.stored?.titlePending == true }
     private func reload() { Task { await model.load(app) } }
     private func close() {
         guard !model.isSending, !model.isAddingPhotos else { return }

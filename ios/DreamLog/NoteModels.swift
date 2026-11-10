@@ -28,6 +28,8 @@ nonisolated struct Memory: Codable, Identifiable {
     var revision: Int
     var updatedAt: Date
     var photos: [NotePhoto] = []
+    // The server is still writing the title of a note left untitled; an older server does not send it.
+    var titlePending: Bool?
 }
 
 nonisolated struct MemoryPage: Decodable { var items: [Memory]; var hasMore: Bool; var ranked: Bool? }
@@ -125,7 +127,8 @@ final class NoteEditorModel {
         case let .success(memory):
             stored = memory; missing = false; error = nil
             if !isEditing { value = MemorySave(memory) }
-            for photo in memory.photos {
+            // A photo never changes under its ID, so reading again while the title is on its way fetches only new ones.
+            for photo in memory.photos where photoContent[photo.id] == nil {
                 let result = await client.loadNotePhoto(id, photoID: photo.id)
                 guard current(app) else { return }
                 switch result {

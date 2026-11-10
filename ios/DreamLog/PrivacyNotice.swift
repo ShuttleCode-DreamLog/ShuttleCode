@@ -1,7 +1,7 @@
 import SwiftUI
 import CryptoKit
 
-let noticeVersion = 4
+let noticeVersion = 5
 let noticeKey = "notice-version"
 let noticeContentKey = "notice-content-fingerprint"
 let noticeIntroduction = "Development build: summaries, tags, analyses and patterns are made by an AI service on the server; recording is unavailable. Read how this project handles your data."
@@ -16,7 +16,7 @@ struct PrivacyPart: Identifiable {
 }
 
 let privacyParts: [PrivacyPart] = [
-    .init(title: "AI", text: "A dream's text, date and mood are sent to Google's Gemini models on Vertex AI for a summary, tags, an analysis and comparisons with your other dreams. Life notes and earlier dreams you allow are sent as analysis context, notes you allow and your search wording are sent to search them by meaning, and corrections you type are sent too. The server sends them through the team's Google Cloud project, whose terms do not let Google train its models on them. While DreamLog is a course project, enter only invented sample dreams."),
+    .init(title: "AI", text: "A dream's text, date and mood are sent to Google's Gemini models on Vertex AI for a summary, tags, an analysis and comparisons with your other dreams. Life notes and earlier dreams you allow are sent as analysis context, notes you allow and your search wording are sent to search them by meaning, a note you allow and leave untitled is sent to give it a title, and corrections you type are sent too. The server sends them through the team's Google Cloud project, whose terms do not let Google train its models on them. While DreamLog is a course project, enter only invented sample dreams."),
     .init(title: "Deletion", text: "Deleting a record removes our stored copy, not data the AI provider keeps under its own terms."),
     .init(title: "Storage", text: "Journals, notes and profile fields are stored on the project server; its operators can read them."),
     .init(title: "Permissions", text: "The history switch is in Settings and on Life Notes. Each dream has six AI switches and Keep out of AI processing; each note has Allow AI use. Microphone permission will be managed in iOS Settings when recording is available."),

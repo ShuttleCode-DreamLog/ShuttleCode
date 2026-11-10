@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS dreams (
 CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    type TEXT NOT NULL CHECK(type IN ('transcribe','organize','analyze','index_dream','match_patterns','refresh_findings','generate_image','generate_video')),
+    type TEXT NOT NULL CHECK(type IN ('transcribe','organize','analyze','index_dream','match_patterns','refresh_findings','generate_image','generate_video','title_note')),
     request_key TEXT NOT NULL UNIQUE,
     dream_id TEXT REFERENCES dreams(id) ON DELETE CASCADE,
     subject_id TEXT,
@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title TEXT,
+    title_generated INTEGER NOT NULL DEFAULT 0 CHECK(title_generated IN (0,1)),
     text TEXT NOT NULL,
     recorded_at INTEGER NOT NULL,
     event_date TEXT,

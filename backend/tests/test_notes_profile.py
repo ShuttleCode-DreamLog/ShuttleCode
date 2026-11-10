@@ -3,9 +3,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import msgspec
 import config
 import db
+import memories
 import providers
+import tasks
 from test_foundation import client, credential
 from test_patterns import ai
 
@@ -89,16 +92,19 @@ async def test_new_routes_require_bearer(client):
         assert (await client.request(method,path,json=note())).status_code == 401
 
 
-@pytest.mark.parametrize('version', [1, 2, 3, 4, 5, 6, 7, 8])
+@pytest.mark.parametrize('version', [1, 2, 3, 4, 5, 6, 7, 8, 9])
 async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     path = tmp_path / 'v1.db'
     connection = sqlite3.connect(path)
-    schema = Path(db.__file__).with_name('schema.sql').read_text()
+    # Before version 10 the tasks table had no title_note type, which only a copy of the table can add.
+    schema = Path(db.__file__).with_name('schema.sql').read_text().replace(",'title_note')", ")")
     connection.executescript(schema)
+    connection.execute('ALTER TABLE memories DROP COLUMN title_generated')
     # Version 9 came from two branches: the title owner, and patterns made by hand and dismissed (`dismissed_at` is added
     # only by the upgrade, so schema.sql lacks it already).
-    connection.execute('ALTER TABLE dreams DROP COLUMN title_generated')
-    connection.execute('DROP TABLE pattern_dreams')
+    if version < 9:
+        connection.execute('ALTER TABLE dreams DROP COLUMN title_generated')
+        connection.execute('DROP TABLE pattern_dreams')
     if version < 8:
         connection.execute('DROP VIEW visible_user_tags')
         connection.execute('DROP TABLE imported_tag_links')
@@ -122,6 +128,7 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     connection.execute('INSERT INTO users(id,created_at) VALUES(?,?)', (identity,1))
     connection.execute("INSERT INTO dreams(id,user_id,text,dream_date,source,created_at,updated_at) VALUES(?,?,?,'2026-10-08','text',1,1)", (dream_id,identity,'Kept sample'))
     connection.execute("INSERT INTO memories(id,user_id,text,recorded_at,event_precision,updated_at) VALUES(?,?,'Kept note',1,'unknown',1)", (str(uuid4()),identity))
+    connection.execute("INSERT INTO tasks(id,user_id,type,request_key,dream_id,source_revision,run_after,created_at,updated_at) VALUES(?,?,'organize','organize:kept',?,1,1,1,1)", (str(uuid4()),identity,dream_id))
     # A title equal to the latest generated one is taken as the AI's; a title of the user's own is not.
     titled = {'AI title': str(uuid4()), 'My title': str(uuid4())}
     for title, titled_id in titled.items():
@@ -134,8 +141,12 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     try:
         assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == config.SCHEMA_VERSION
         assert (await upgraded.execute_fetchall('SELECT text FROM dreams WHERE id=?',(dream_id,)))[0][0] == 'Kept sample'
-        assert {title: (await upgraded.execute_fetchall('SELECT title_generated FROM dreams WHERE id=?',(titled_id,)))[0][0] for title, titled_id in titled.items()} == {'AI title': 1, 'My title': 0}
-        assert [tuple(row) for row in await upgraded.execute_fetchall('SELECT title,text FROM memories')] == [(None, 'Kept note')]
+        assert {title: (await upgraded.execute_fetchall('SELECT title_generated FROM dreams WHERE id=?',(titled_id,)))[0][0] for title, titled_id in titled.items()} == {'AI title': int(version < 9), 'My title': 0}
+        assert [tuple(row) for row in await upgraded.execute_fetchall('SELECT title,title_generated,text FROM memories')] == [(None, 0, 'Kept note')]
+        assert [tuple(row) for row in await upgraded.execute_fetchall('SELECT request_key,dream_id FROM tasks')] == [('organize:kept', dream_id)]
+        await upgraded.execute("INSERT INTO tasks(id,user_id,type,request_key,subject_id,source_revision,run_after,created_at,updated_at) VALUES(?,?,'title_note','title_note:new',?,1,1,1,1)", (str(uuid4()),identity,str(uuid4())))
+        assert {row[0] for row in await upgraded.execute_fetchall("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tasks' AND sql IS NOT NULL")} == {'tasks_index_2', 'tasks_index_3', 'tasks_index_4'}
+        assert not await upgraded.execute_fetchall("SELECT 1 FROM sqlite_master WHERE name='tasks_before_10'")
         assert not await upgraded.execute_fetchall('SELECT * FROM profiles')
         assert not await upgraded.execute_fetchall('SELECT * FROM pattern_groups')
         assert not await upgraded.execute_fetchall('SELECT * FROM pattern_dreams')
@@ -192,3 +203,37 @@ async def test_notes_permission_only_save_ignores_stale_revision(client):
     await client.put(path, headers=headers, json=note('Invented: edited.', base_revision=1))
     turned = await client.put(path, headers=headers, json=note('Invented: edited.', base_revision=1, allow_analysis=False))
     assert turned.status_code == 200 and turned.json()['memory']['revision'] == 2 and not turned.json()['memory']['allow_analysis']
+
+
+async def test_note_title_is_written_from_the_text_until_the_user_types_one(client, monkeypatch):
+    sent = []
+    async def complete_json(instruction, content, schema, name, answer_type, temperature=None):
+        sent.append(content)
+        return msgspec.convert({'title': f'  Generated   {len(sent)} '}, answer_type)
+    monkeypatch.setattr(providers, 'complete_json', complete_json)
+    monkeypatch.setattr(tasks, 'handlers', {'title_note': memories.title_note})
+    headers, path = credential(), f'/v1/memories/{uuid4()}'
+    async def save(**fields):
+        response = await client.put(path, headers=headers, json=note(**fields))
+        ran = await tasks.run_once()
+        return response.json()['memory'], ran, (await client.get(path, headers=headers)).json()['memory']
+    created, ran, read = await save(text='Invented: exam week.')
+    assert created['title'] is None and created['title_pending'] and ran
+    assert (read['title'], read['title_pending'], read['revision']) == ('Generated 1', False, 1) and 'Invented: exam week.' in sent[0]
+    # Another date with the AI's title sent back: no call. A new text with it: a new title.
+    dated = {'event_date': '2026-10-01', 'event_precision': 'exact'}
+    _, ran, read = await save(text='Invented: exam week.', base_revision=1, title='Generated 1', **dated)
+    assert not ran and (read['title'], read['title_pending'], read['revision'], len(sent)) == ('Generated 1', False, 2, 1)
+    _, ran, read = await save(text='Invented: exam results.', base_revision=2, title='Generated 1', **dated)
+    assert ran and read['title'] == 'Generated 2'
+    # A typed title stays through text changes; clearing it asks for a title again.
+    _, ran, read = await save(text='Invented: exam over.', base_revision=3, title='Mine')
+    assert not ran and read['title'] == 'Mine' and not read['title_pending']
+    _, ran, read = await save(text='Invented: exam over.', base_revision=4, title='')
+    assert ran and read['title'] == 'Generated 3' and len(sent) == 3
+    # A title typed while one was on its way wins; a note kept out of AI use is never sent.
+    await client.put(path, headers=headers, json=note('Invented: exam retaken.', base_revision=5, title='Generated 3'))
+    await client.put(path, headers=headers, json=note('Invented: exam retaken.', base_revision=6, title='Typed meanwhile'))
+    assert await tasks.run_once() and (await client.get(path, headers=headers)).json()['memory']['title'] == 'Typed meanwhile' and len(sent) == 3
+    private = (await client.put(f'/v1/memories/{uuid4()}', headers=headers, json=note('Invented: private.', allow_analysis=False))).json()['memory']
+    assert not private['title_pending'] and not await tasks.run_once() and len(sent) == 3
