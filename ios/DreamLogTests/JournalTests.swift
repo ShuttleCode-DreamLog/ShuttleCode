@@ -42,6 +42,45 @@ extension FoundationTests {
         #expect(BackendProtocol.state.withLock { $0.requests.count } == 1)
         await closeJournalApp(app)
     }
+    @Test func trailingBlankLinesAreDroppedAndAddingOnlyThemSendsNothing() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let id = newID()
+        let model = DreamModel(id: id, newEntry: true)
+        await model.load(app)
+        model.change(app) { $0.text = "An invented dream.\n\n \n\n" }
+        enqueue([(201, try dreamResponse(journalDream(id: id)))])
+        #expect(await model.close(app))
+        let sent = try #require(lastRequest())
+        #expect(sentBody(sent)?["text"] as? String == "An invented dream.")
+        model.isEditing = true
+        model.change(app) { $0.text += "\n\n\n" }
+        #expect(await model.close(app))
+        // Only blank lines were added, so nothing is sent and the server schedules no new analysis.
+        #expect(BackendProtocol.state.withLock { $0.requests.count } == 1)
+        #expect(model.draft?.text == "An invented dream." && model.draft?.unsent == false && !model.isEditing)
+        #expect(try await app.store.draft(id).get() == nil)
+        await closeJournalApp(app)
+    }
+
+    @Test func storedTrailingBlankLinesStayWhenOnlyTheMoodChanges() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let id = newID()
+        let stored = journalDream(id: id, text: "Saved before the trimming.\n\n")
+        enqueue([(200, try dreamResponse(stored))])
+        let model = DreamModel(id: id)
+        await model.load(app)
+        model.isEditing = true
+        model.change(app) { $0.mood = .calm; $0.text += "\n" }
+        enqueue([(200, try dreamResponse(stored))])
+        #expect(await model.close(app))
+        // The text the server holds is sent back unchanged, so the mood change does not count as a new text revision.
+        let sent = try #require(lastRequest())
+        #expect(sentBody(sent)?["text"] as? String == "Saved before the trimming.\n\n")
+        await closeJournalApp(app)
+    }
+
     func journalDream(id: String, text: String = "An invented dream.", title: String? = nil, revision: Int = 1) -> Dream {
         Dream(id: id, text: text, revision: revision, dreamDate: journalDate(), title: title, mood: nil, source: .text, audioStatus: "none", permissions: Permissions(), tasks: [], createdAt: .now, updatedAt: .now)
     }

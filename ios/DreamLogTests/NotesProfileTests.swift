@@ -15,6 +15,24 @@ extension FoundationTests {
         #expect(!model.hasChanges && !model.isEditing)
         await closeJournalApp(app)
     }
+    @Test func noteDropsTrailingBlankLinesAndAddingOnlyThemSendsNothing() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let id = newID()
+        let model = NoteEditorModel(id: id, newEntry: true)
+        model.value.text = "Sample life note.\n\n \n"
+        enqueue([(201, try memoryResponse(id: id))])
+        #expect(await model.save(app))
+        let sent = try #require(lastRequest())
+        #expect(sentBody(sent)?["text"] as? String == "Sample life note.")
+        model.isEditing = true
+        model.value.text += "\n\n\n"
+        #expect(!model.hasChanges)
+        #expect(await model.save(app))
+        #expect(BackendProtocol.state.withLock { $0.requests.count } == 1)
+        #expect(model.value.text == "Sample life note." && !model.isEditing)
+        await closeJournalApp(app)
+    }
     @Test func unavailableJournalRejectsSaveWithFeedbackAndKeepsInput() async throws {
         let (app, identity, defaults, namespace) = try await journalApp()
         defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }

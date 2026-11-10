@@ -76,6 +76,7 @@ Where the wiki and the team's story map v2 (revised 2026-10-11) disagree on scop
 - Bearer identity controls every journal route. Another user's entry ID grants no access.
 - Atomic saves preserve entry IDs; text revisions prevent stale edits from overwriting stored text. Conflicts and deletion failures preserve local input.
 - Saving a text dream schedules `organize` (summary and tags, a story map Skeletal card) for each new text revision; title, mood and date changes schedule nothing. Voice and other later wiki increments remain separate.
+- Saving a dream or a life note drops blank lines and spaces after the last word (`meaningfulText`); adding only those is no edit, so nothing is sent and no new revision or analysis follows, and a stored text that differs only by them is sent back unchanged (10 November 2026).
 
 ### Current editor and photo requirements
 

@@ -160,6 +160,14 @@ final class DreamModel {
             }
         }
         guard var sending = draft, !sending.conflict, !missing else { return }
+        // A stored text that differs only by trailing blanks is kept as stored, so the server sees no text change.
+        let text = meaningfulText(sending.text)
+        sending.text = dream.map { meaningfulText($0.text) == text ? $0.text : text } ?? text
+        if let dream, sending.matches(dream) {
+            guard case .success = await app.store.deleteDraft(id) else { error = "Could not remove the local draft."; return }
+            draft = Draft(dream: dream); isEditing = false; error = nil
+            return
+        }
         let length = sending.text.unicodeScalars.count
         guard !sending.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               (length <= app.limits.maxDreamChars || length <= (dream?.text.unicodeScalars.count ?? 0)),

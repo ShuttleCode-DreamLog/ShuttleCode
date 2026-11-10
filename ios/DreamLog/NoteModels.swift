@@ -105,8 +105,8 @@ final class NoteEditorModel {
     private func current(_ app: AppModel) -> Bool { epoch == app.journalEpoch && app.noticeSeen && !app.deleting }
     var hasChanges: Bool {
         if !pendingPhotos.isEmpty { return true }
-        guard let stored else { return !value.text.isEmpty || !value.title.isEmpty }
-        return value.text != stored.text || value.title != (stored.title ?? "") || value.eventDate != stored.eventDate || value.eventPrecision != stored.eventPrecision || value.isOngoing != stored.isOngoing || value.allowAnalysis != stored.allowAnalysis
+        guard let stored else { return !meaningfulText(value.text).isEmpty || !value.title.isEmpty }
+        return meaningfulText(value.text) != meaningfulText(stored.text) || value.title != (stored.title ?? "") || value.eventDate != stored.eventDate || value.eventPrecision != stored.eventPrecision || value.isOngoing != stored.isOngoing || value.allowAnalysis != stored.allowAnalysis
     }
     func canSave(_ app: AppModel) -> Bool {
         let content = !value.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingPhotos.isEmpty || !(stored?.photos.isEmpty ?? true)
@@ -146,6 +146,10 @@ final class NoteEditorModel {
         // A new note can be submitted before its view's initial load task runs.
         if epoch == nil && newEntry { epoch = app.journalEpoch }
         guard current(app) else { error = "This editor belongs to a previous journal. Reopen Notes and try again."; return false }
+        // A stored text that differs only by trailing blanks is kept as stored, and a note with nothing else changed is not sent.
+        let text = meaningfulText(value.text)
+        value.text = stored.map { meaningfulText($0.text) == text ? $0.text : text } ?? text
+        if stored != nil && !hasChanges { isEditing = false; error = nil; return true }
         guard canSave(app) else { error = "Add text or a photo within the character limit, and resolve any conflict before saving."; return false }
         isSending = true
         error = nil

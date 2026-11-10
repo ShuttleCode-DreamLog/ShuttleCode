@@ -16,6 +16,12 @@ nonisolated func journalDay(_ value: String) -> Date {
     return formatter.date(from: value) ?? .now
 }
 
+// Blank lines and spaces after the last word carry nothing: a save drops them, and adding only them is no edit, so the server
+// keeps the revision and asks for no new analysis (10 November 2026).
+nonisolated func meaningfulText(_ text: String) -> String {
+    String(text[..<(text.lastIndex { !$0.isWhitespace }.map(text.index(after:)) ?? text.startIndex)])
+}
+
 nonisolated enum Mood: String, Codable, CaseIterable, Sendable {
     case calm, happy, excited, confused, sad, anxious, afraid, angry, unknown
     init(from decoder: any Decoder) throws { self = Mood(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
