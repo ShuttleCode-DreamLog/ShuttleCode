@@ -168,7 +168,7 @@ Section kinds, in stored order (instruction `analyze-2`, the four-part analysis 
 Each life note entry also carries `choice`: `"added"` when the user added it, `"removed"` when the user took it out since this analysis ran (it stays listed until the next run), or null. `pending_notes` lists the added notes this analysis has not used yet, as `[{"source_id", "title", "source_date"}]`. It is empty when the history switch is off, because no note is sent then.
 
 `PUT /v1/dreams/{id}/analysis/notes/{memory_id}` with `{"choice": "added" | "removed"}` records the user's choice for that dream, and `DELETE` on the same path clears it, so the note goes back to the automatic pick. Both answer with the `GET /v1/dreams/{id}/analysis` body.
-- Added notes, at most `MAX_ADDED_MEMORIES` (4), come first as M1… on top of the up to 4 automatic ones. They skip the date and shared-term rules. A removed note is never picked automatically.
+- Added notes, at most `MAX_ADDED_MEMORIES` (4), come first as M1… on top of the up to 20 automatic ones. They skip the date window. A removed note is never picked automatically.
 - A changed choice marks the analysis `outdated` and runs nothing; the next refresh uses it. A choice changed while an analysis is running is saved, and that analysis is then marked `outdated` instead of being retried.
 - Errors: 400 for any other choice; 403 `not_permitted` when the dream's `analysis` switch is off; 404 for a dream or note that isn't the user's; 409 `not_permitted` when adding a note whose "Allow AI use" is off; 409 `too_many` when adding a fifth note. Notes whose "Allow AI use" was turned off after they were added don't count toward the limit and are never sent.
 

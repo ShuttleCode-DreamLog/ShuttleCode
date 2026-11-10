@@ -117,7 +117,6 @@ async def select_context(connection, dream, use_history):
     user = (await connection.execute_fetchall('SELECT timezone FROM users WHERE id=?', (dream['user_id'],)))[0]
     zone = zone_of(user['timezone'])
     dream_day = date.fromisoformat(dream['dream_date'])
-    terms = dream_terms([tag['text'] for tag in tags], dream['text'])
     # Notes the user added skip the date and match rules because the user chose them; removed ones are never picked (Re-Design list, 6 November 2026).
     added = await connection.execute_fetchall("SELECT m.*,c.opened_date FROM analysis_note_choices a JOIN memories m ON m.id=a.memory_id LEFT JOIN checkins c ON c.id=m.checkin_id WHERE a.dream_id=? AND a.choice='added' AND m.user_id=? AND m.allow_analysis=1 ORDER BY a.created_at,a.memory_id LIMIT ?", (dream['id'], dream['user_id'], config.MAX_ADDED_MEMORIES))
     chosen = {row['memory_id'] for row in await connection.execute_fetchall('SELECT memory_id FROM analysis_note_choices WHERE dream_id=?', (dream['id'],))}
@@ -127,32 +126,14 @@ async def select_context(connection, dream, use_history):
         if memory['id'] in chosen:
             continue
         days = memory_days(memory, zone, date.fromisoformat(memory['opened_date']) if memory['opened_date'] else None)
-        if days[0] > dream_day and not days[2]:
-            continue
-        if (score := memory_score(memory, days, dream_day, terms)) >= 1:
-            scored.append((memory, score))
-    ongoing = sorted((memory for memory, _ in scored if memory['is_ongoing']), key=lambda memory: -memory['recorded_at'])
-    others = [memory for memory, _ in sorted(((memory, score) for memory, score in scored if not memory['is_ongoing']), key=lambda pair: (-pair[1], -pair[0]['recorded_at']))]
-    for number, memory in enumerate([*added, *(ongoing + others)[:config.MAX_CONTEXT_MEMORIES]], 1):
-        when = (f"Event date: {memory['event_date']} ({memory['event_precision']})" if memory['event_date'] else f"From a weekly check-in opened {memory['opened_date']}" if memory['opened_date'] else 'Event date unknown')
-        body = '\n'.join([memory['text'], when, f"Recorded: {local_day(memory['recorded_at'], zone).isoformat()}"] + (['Ongoing'] if memory['is_ongoing'] else []))
+        if (days[0] <= dream_day or days[2]) and in_window(memory, days, dream_day):
+            recent.append((memory, days[1]))
+    # The model picks which notes resonate (analysis spec, Waking Life), so it gets every recent note rather than term matches.
+    picked = sorted(recent, key=lambda pair: (pair[1], pair[0]['recorded_at']), reverse=True)[:config.MAX_CONTEXT_MEMORIES]
+    hand = [(memory, memory_days(memory, zone, date.fromisoformat(memory['opened_date']) if memory['opened_date'] else None)[1]) for memory in added]
+    for number, (memory, day) in enumerate([*hand, *picked], 1):
+        body = f"{day.isoformat()}: {memory['text']}" + (' (ongoing)' if memory['is_ongoing'] else '')
         sources.append({'label': f'M{number}', 'kind': 'memory', 'source_id': memory['id'], 'source_revision': memory['revision'], 'source_date': memory['event_date'], 'cut_to': None, 'body': body})
-    candidates = await connection.execute_fetchall("SELECT * FROM dreams WHERE user_id=? AND id<>? AND allow_history=1 AND text<>'' AND dream_date<=?", (dream['user_id'], dream['id'], dream['dream_date']))
-    candidate_tags, summaries = {}, {}
-    for tag in await current_tags(connection, [candidate['id'] for candidate in candidates]):
-        candidate_tags.setdefault(tag['dream_id'], set()).add(tag['text'])
-    for output in await connection.execute_fetchall(f"SELECT id,dream_id,content FROM outputs WHERE type='organization' AND status='current' AND dream_id IN ({','.join('?' * len(candidates))})", tuple(candidate['id'] for candidate in candidates)) if candidates else []:
-        summaries[output['dream_id']] = msgspec.json.decode(output['content'])['summary']
-    matched = []
-    for candidate in candidates:
-        score = sum(term in candidate_tags.get(candidate['id'], ()) or term_in(term, summaries.get(candidate['id'], '')) or term_in(term, candidate['text']) for term in terms)
-        if score >= config.MIN_DREAM_MATCHES:
-            matched.append((candidate, score))
-    best = sorted(matched, key=lambda pair: (pair[1], pair[0]['dream_date'], pair[0]['created_at']), reverse=True)[:config.MAX_CONTEXT_DREAMS]
-    for number, (candidate, _) in enumerate(best, 1):
-        text = candidate['text'][:config.MAX_CONTEXT_DREAM_CHARS]
-        sources.append({'label': f'D{number}', 'kind': 'dream', 'source_id': candidate['id'], 'source_revision': candidate['revision'], 'source_date': candidate['dream_date'],
-                        'cut_to': len(text) if len(text) < len(candidate['text']) else None, 'text': text})
     return sources
 
 
