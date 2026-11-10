@@ -49,7 +49,7 @@ extension FoundationTests {
           "tasks": [{"id": "t1", "type": "organize", "status": "failed", "error_code": "cap_reached", "dream_id": "9f1e", "subject_id": null, "source_revision": 2, "updated_at": 1760371200000},
                     {"id": "t2", "type": "index_dream", "status": "waiting", "error_code": null, "dream_id": "9f1e", "subject_id": null, "source_revision": 2, "updated_at": 1760371200000},
                     {"id": "t3", "type": "future_kind", "status": "paused", "error_code": null, "dream_id": "9f1e", "subject_id": null, "source_revision": 2, "updated_at": 1760371200000}],
-          "organization": {"status": "current", "dream_revision": 2, "summary": "A walk by a lake.", "summary_corrected": false,
+          "organization": {"status": "current", "dream_revision": 2, "summary": "A walk by a lake.",
             "tags": [{"category": "place", "text": "blue lake", "original_text": "lake", "excerpt": "by the lake", "feeling": null, "corrected": true, "removed": false},
                      {"category": "emotion", "text": "calm", "original_text": "calm", "excerpt": "calm", "feeling": "inferred", "corrected": false, "removed": true}],
             "created_at": 1760371200000},
@@ -68,13 +68,13 @@ extension FoundationTests {
           "withheld": 1,
           "context": [{"label": "DREAM", "kind": "dream", "source_id": "9f1e", "source_revision": 2, "source_date": "2026-10-15", "available": true, "cut_to": null},
                       {"label": "DESC", "kind": "output", "source_id": "o1", "source_revision": 1, "source_date": null, "available": false, "cut_to": null},
-                      {"label": "M1", "kind": "memory", "source_id": "77aa", "source_revision": 1, "source_date": "2026-10-13", "available": true, "cut_to": 200}],
+                      {"label": "M1", "kind": "memory", "source_id": "77aa", "source_revision": 1, "source_date": "2026-10-13", "available": true, "cut_to": 200, "title": "Exam week"}],
           "removed_sources": 1, "dream_date": "2026-10-15", "mood": null, "model": "test-model", "instruction_version": "analyze-1", "created_at": 1760371200000},
          "task": null}
         """.utf8)
         let read = try serverDecoder().decode(AnalysisResponse.self, from: analysis)
         let result = try #require(read.analysis)
-        let note = "Life note · \(displayDate("2026-10-13"))"
+        let note = "Exam week · \(displayDate("2026-10-13"))"
         #expect(result.context.map(\.name) == ["This dream", "This dream's summary and tags", note])
         #expect(result.text(of: result.sections[0]) == "The deadline \(note) may echo the rush.")
         #expect(result.sources(of: result.sections[0]) == ["This dream", note])
@@ -159,9 +159,6 @@ extension FoundationTests {
         let correction = try #require(lastRequest())
         #expect(correction.url?.path() == "/v1/dreams/\(id)/corrections")
         #expect((sentBody(correction) as? [String: String]) == ["category": "place", "original_text": "lake", "text": ""])
-        enqueue([(200, try dreamResponse(stored))])
-        await model.correct(app, DreamCorrection(category: "summary", text: "Mine."))
-        #expect((sentBody(try #require(lastRequest())) as? [String: String]) == ["category": "summary", "text": "Mine."])
 
         let failed = TaskInfo(id: newID(), type: .organize, status: .failed, errorCode: "cap_reached", updatedAt: .now)
         model.dream?.tasks = [failed]

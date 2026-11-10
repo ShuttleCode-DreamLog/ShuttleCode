@@ -20,8 +20,9 @@ import discussion
 import patterns
 import providers
 import tasks
+import tag_library
 from dreams import delete_dream, get_dream, list_dreams, list_tags, save_correction, save_dream, save_permissions, search_dreams
-from memories import delete_memory, get_memory, list_memories, save_memory
+from memories import delete_memory, get_memory, list_memories, save_memory, search_memories
 from profiles import get_profile, save_profile
 from photos import delete_photo, get_photo, save_photo
 from config import data_directory
@@ -90,9 +91,15 @@ async def fault(request):
 
 routes = [Route("/v1/me", get_me, methods=["GET"]), Route("/v1/me", put_me, methods=["PUT"]), Route("/v1/me", delete_me, methods=["DELETE"])]
 routes.extend([
+    Route("/v1/tag-library", tag_library.list_library, methods=["GET"]),
+    Route("/v1/tag-library", tag_library.create_tag, methods=["POST"]),
+    Route("/v1/tag-library/{tag_id}", tag_library.rename_tag, methods=["PUT"]),
+    Route("/v1/tag-library/{tag_id}", tag_library.delete_tag, methods=["DELETE"]),
+    Route("/v1/dreams/{dream_id}/tags", tag_library.save_selection, methods=["PUT"]),
     Route("/v1/me/profile", get_profile, methods=["GET"]),
     Route("/v1/me/profile", save_profile, methods=["PUT"]),
     Route("/v1/memories", list_memories, methods=["GET"]),
+    Route("/v1/memories/search", search_memories, methods=["POST"]),
     Route("/v1/memories/{memory_id}/photos/{photo_id}", get_photo, methods=["GET"]),
     Route("/v1/memories/{memory_id}/photos/{photo_id}", save_photo, methods=["PUT"]),
     Route("/v1/memories/{memory_id}/photos/{photo_id}", delete_photo, methods=["DELETE"]),
@@ -109,6 +116,7 @@ routes.extend([
     Route("/v1/dreams/{dream_id}/corrections", save_correction, methods=["PUT"]),
     Route("/v1/dreams/{dream_id}/analysis", analysis.get_analysis, methods=["GET"]),
     Route("/v1/dreams/{dream_id}/analysis/refresh", analysis.refresh_analysis, methods=["POST"]),
+    Route("/v1/dreams/{dream_id}/analysis/notes/{memory_id}", analysis.choose_note, methods=["PUT", "DELETE"]),
     Route("/v1/dreams/{dream_id}/conversation", discussion.get_conversation, methods=["GET"]),
     Route("/v1/dreams/{dream_id}/conversation/messages", discussion.send_message, methods=["POST"]),
     Route("/v1/dreams/{dream_id}/conversation/restart", discussion.restart_conversation, methods=["POST"]),

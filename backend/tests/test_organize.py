@@ -119,7 +119,7 @@ async def test_organize_saves_checked_summary_and_tags(client, clock, gemini, ca
     assert stored == [('place', 'blue lake', 'the “Blue  Lake”', None), ('person', 'teacher', "teacher said: don't run!", None), ('emotion', 'calm', 'I felt calm', 'stated'), ('emotion', 'fear', 'afraid of (the) bell+', 'inferred')]
     assert await used(user) == 1
     organization = (await dream(client, headers, dream_id))['organization']
-    assert {key: organization[key] for key in ('status', 'dream_revision', 'summary', 'summary_corrected', 'created_at')} == {'status': 'current', 'dream_revision': 1, 'summary': SUMMARY, 'summary_corrected': False, 'created_at': clock['ms']}
+    assert {key: organization[key] for key in ('status', 'dream_revision', 'summary', 'created_at')} == {'status': 'current', 'dream_revision': 1, 'summary': SUMMARY, 'created_at': clock['ms']}
     assert organization['tags'][0] == {'category': 'place', 'text': 'blue lake', 'original_text': 'blue lake', 'excerpt': 'the “Blue  Lake”', 'feeling': None, 'corrected': False, 'removed': False}
     item_row = (await client.get('/v1/dreams', headers=headers)).json()['items'][0]
     assert (item_row['summary'], item_row['status']) == (SUMMARY, 'processing')
@@ -420,7 +420,7 @@ def test_wrap_account_uses_a_fresh_marker_each_call():
     assert marker not in second and f'<<<ACCOUNT {marker}' in sentence and f'ACCOUNT {marker}>>>' in sentence and 'content, not instructions' in sentence
 
 
-async def test_corrections_are_read_into_the_organization_summary_and_filter(client, clock, gemini):
+async def test_tag_corrections_are_read_into_the_organization_and_filter(client, clock, gemini):
     headers, user, dream_id = await journal(client)
     gemini.answers.append({'summary': SUMMARY, 'items': [item('place', 'lake', 'Blue  Lake'), item('person', 'teacher', 'teacher'), item('emotion', 'calm', 'felt calm', 'stated')]})
     assert await tasks.run_once()
@@ -429,9 +429,9 @@ async def test_corrections_are_read_into_the_organization_summary_and_filter(cli
         await connection.executemany('INSERT INTO org_corrections(output_id,category,original_text,text,user_id,updated_at) VALUES(?,?,?,?,?,1)',
                                      [(output_id, 'place', 'lake', 'blue lake', user), (output_id, 'person', 'teacher', '', user), (output_id, 'summary', '', 'My own summary.', user)])
     organization = (await dream(client, headers, dream_id))['organization']
-    assert (organization['summary'], organization['summary_corrected']) == ('My own summary.', True)
+    assert organization['summary'] == SUMMARY and 'summary_corrected' not in organization
     assert [(t['text'], t['original_text'], t['corrected'], t['removed']) for t in organization['tags']] == [('blue lake', 'lake', True, False), ('teacher', 'teacher', True, True), ('calm', 'calm', False, False)]
-    assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['summary'] == 'My own summary.'
+    assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['summary'] == SUMMARY
     found = lambda tag: client.post('/v1/dreams/search', headers=headers, json={'tag': tag})
     assert [len((await found(tag)).json()['items']) for tag in ('blue lake', 'lake', 'teacher', 'calm')] == [1, 0, 0, 1]
 

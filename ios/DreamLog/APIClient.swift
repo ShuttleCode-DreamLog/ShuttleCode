@@ -108,8 +108,11 @@ final class APIClient {
         await response(method: "DELETE", path: "v1/dreams/\(id)", empty: true).map { _ in () }
     }
     func deleteMe() async -> Result<Void, APIError> { await response(method: "DELETE", deleting: true).map { _ in () } }
-    func loadMemories(offset: Int = 0) async -> Result<MemoryPage, APIError> {
-        decode(await response(method: "GET", path: "v1/memories", query: [URLQueryItem(name: "offset", value: String(offset))]))
+    func loadMemories(offset: Int = 0, query: String = "") async -> Result<MemoryPage, APIError> {
+        let paging = [URLQueryItem(name: "offset", value: String(offset))]
+        if query.isEmpty { return decode(await response(method: "GET", path: "v1/memories", query: paging)) }
+        guard let body = try? JSONEncoder().encode(["query": query]) else { return .failure(.decoding) }
+        return decode(await response(method: "POST", path: "v1/memories/search", query: paging, body: body))
     }
     func loadMemory(_ id: String) async -> Result<Memory, APIError> {
         let result: Result<MemoryResponse, APIError> = decode(await response(method: "GET", path: "v1/memories/\(id)"))
@@ -164,12 +167,34 @@ final class APIClient {
         let result: Result<TaskResponse, APIError> = decode(await response(method: "POST", path: "v1/tasks/\(id)/retry"))
         return result.map(\.task)
     }
+    func loadTagLibrary() async -> Result<TagLibraryResponse, APIError> {
+        decode(await response(method: "GET", path: "v1/tag-library"))
+    }
+    func createLibraryTag(_ text: String) async -> Result<LibraryTag, APIError> {
+        let result: Result<LibraryTagResponse, APIError> = await send("POST", "v1/tag-library", LibraryTagName(text: text))
+        return result.map(\.tag)
+    }
+    func renameLibraryTag(_ id: String, text: String) async -> Result<TagLibraryResponse, APIError> {
+        await send("PUT", "v1/tag-library/\(id)", LibraryTagName(text: text))
+    }
+    func deleteLibraryTag(_ id: String) async -> Result<Void, APIError> {
+        (await response(method: "DELETE", path: "v1/tag-library/\(id)")).map { _ in () }
+    }
+    func saveDreamTags(_ id: String, ids: [String]) async -> Result<Dream, APIError> {
+        let result: Result<DreamResponse, APIError> = await send("PUT", "v1/dreams/\(id)/tags", DreamTagSelection(tagIds: ids))
+        return result.map(\.dream)
+    }
     func loadAnalysis(_ dreamID: String) async -> Result<AnalysisResponse, APIError> {
         decode(await response(method: "GET", path: "v1/dreams/\(dreamID)/analysis"))
     }
     func refreshAnalysis(_ dreamID: String, refreshID: String) async -> Result<TaskInfo, APIError> {
         let result: Result<TaskResponse, APIError> = await send("POST", "v1/dreams/\(dreamID)/analysis/refresh", RefreshRequest(refreshId: refreshID))
         return result.map(\.task)
+    }
+    func chooseAnalysisNote(_ dreamID: String, memoryID: String, choice: String?) async -> Result<AnalysisResponse, APIError> {
+        let path = "v1/dreams/\(dreamID)/analysis/notes/\(memoryID)"
+        guard let choice else { return decode(await response(method: "DELETE", path: path)) }
+        return await send("PUT", path, ["choice": choice])
     }
     func loadConversation(_ dreamID: String) async -> Result<Conversation, APIError> {
         let result: Result<ConversationResponse, APIError> = decode(await response(method: "GET", path: "v1/dreams/\(dreamID)/conversation"))

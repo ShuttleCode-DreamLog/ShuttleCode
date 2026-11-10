@@ -10,7 +10,7 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | --- | --- | --- | --- |
 | Device settings | `GET /v1/me` | `PUT /v1/me` | `DELETE /v1/me` deletes all owned data |
 | Journal | `GET /v1/dreams`, `GET /v1/dreams/{id}` | `PUT /v1/dreams/{id}`, `PUT /v1/dreams/{id}/permissions` | `DELETE /v1/dreams/{id}` |
-| Life notes | `GET /v1/memories`, `GET /v1/memories/{id}` | `PUT /v1/memories/{id}` | `DELETE /v1/memories/{id}` |
+| Life notes | `GET /v1/memories`, `GET /v1/memories/{id}`, `POST /v1/memories/search` | `PUT /v1/memories/{id}` | `DELETE /v1/memories/{id}` |
 | Note photos | `GET /v1/memories/{id}/photos/{photo_id}` | `PUT /v1/memories/{id}/photos/{photo_id}` | `DELETE /v1/memories/{id}/photos/{photo_id}` |
 | Profile | `GET /v1/me/profile` | `PUT /v1/me/profile` | Remove keys or send empty `fields`; whole-user deletion also clears it |
 | AI tasks | In `dream.tasks` and journal `status` | `POST /v1/tasks/{id}/retry` | Deleted with their dream or the whole journal |
@@ -18,6 +18,8 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | Patterns | `GET /v1/patterns` | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Groups without members, corrections or a user label are removed by the next refresh |
 
 Lists return `{"items":[…],"has_more":false}`. Pass `limit` (1–200, default 50) and `offset` (default 0). Journal order is date descending, creation time descending, ID ascending; Notes order is recording time descending, ID ascending. Notes additionally accepts `ongoing=true` or `ongoing=false`.
+
+Note search: `POST /v1/memories/search` with `{"query":"a walk by the lake","ongoing":true}` (`ongoing` optional) and the list's paging, ranked like dream search. The wording is embedded once (one unit of the day's text allowance); on the first page, up to `MAX_SEARCH_EMBEDS` (10) notes with Allow AI use on and no vector for their current revision are embedded first, newest first, and kept in `memory_vectors`, so later searches reuse them (notes are not indexed on save). Notes within `SEARCH_MAX_DISTANCE` (0.42, measured on dreams) come back closest first with `similarity`, then notes that carry the words literally with `similarity` null; `ranked` is true. A note with Allow AI use off is never embedded, and switching it off drops its vector. When the vector extension is missing, the allowance is used up or the embedding call fails, `ranked` is false and the search is literal title/text matching in list order (`%`, `_` and `\` match themselves; letters match regardless of ASCII case). A blank query lists every note; one longer than `max_message_chars` returns 413 `too_large`.
 
 ## Journal
 
@@ -130,25 +132,24 @@ The worker claims at most three attempts per task, waiting 15 s and 60 s between
 When `organize` completes, `dream.organization` holds the result for the revision it was made from, and a dream the user left untitled takes the generated title (at most 48 characters) as its `title`, as metadata without a new revision; a title the user typed is never replaced, and the user can rename the dream afterwards as before:
 
 ```json
-{"status": "current", "dream_revision": 2, "summary": "A night walk by a blue lake.", "summary_corrected": false,
+{"status": "current", "dream_revision": 2, "summary": "A night walk by a blue lake.",
  "tags": [{"category": "place", "text": "blue lake", "original_text": "blue lake", "excerpt": "by the Blue Lake", "feeling": null, "corrected": false, "removed": false}],
  "created_at": 1760371200000}
 ```
 
-It is `null` until the first result. After a text edit it stays visible with `status` `outdated` until the new revision is organized; the journal `summary` is null meanwhile. `category` is `person`, `place`, `object`, `action`, `emotion` or `theme`; `feeling` is `stated` or `inferred` for an emotion and null otherwise. Every excerpt is a passage of the dream text as written, checked by the backend; items without a matching excerpt are dropped, labels are lower case, and at most 30 tags are kept. `corrected`, `removed` and `summary_corrected` reflect the user's corrections (below). Only the dream text is sent to Gemini, never the title, mood or notes, and the daily `text` limit counts each attempt.
+It is `null` until the first result. After a text edit it stays visible with `status` `outdated` until the new revision is organized; the journal `summary` is null meanwhile. `category` is `person`, `place`, `object`, `action`, `emotion` or `theme`; `feeling` is `stated` or `inferred` for an emotion and null otherwise. Every excerpt is a passage of the dream text as written, checked by the backend; items without a matching excerpt are dropped, labels are lower case, and at most 30 tags are kept. `corrected` and `removed` reflect the user's tag corrections (below); `summary` is always the generated one. Only the dream text is sent to Gemini, never the title, mood or notes, and the daily `text` limit counts each attempt.
 
-## Correcting the summary and tags
+## Correcting the tags
 
 `PUT /v1/dreams/{id}/corrections` changes what the current organization says, without changing the dream:
 
 ```json
 {"category": "person", "original_text": "teacher", "text": "my aunt"}
-{"category": "summary", "text": "My own summary."}
 ```
 
-`category` is `summary` or a tag category; a tag correction names the tag by its `original_text` (from `organization.tags`). `text` is the new wording, normalized like a tag (trimmed, lower case, single spaces); an empty `text` removes the tag, and sending the tag's original text, or the generated summary, takes the correction back. A rename to the present text of another tag of the same category removes the tag instead, so no tag appears twice. Repeating a request changes nothing. Success is 200 with `{"dream":{…}}`. 409 `invalid_state` without a current organization (none yet, or outdated after a text edit), 400 for an unknown category, a missing `original_text` or one that matches no tag, or an empty summary, 413 over 60 characters for a tag or 600 for a summary.
+`category` is a tag category; since 6 November 2026 the summary is only the generated one, so `summary` is refused with 400 and a summary correction stored earlier is ignored. The correction names the tag by its `original_text` (from `organization.tags`). `text` is the new wording, normalized like a tag (trimmed, lower case, single spaces); an empty `text` removes the tag, and sending the tag's original text takes the correction back. A rename to the present text of another tag of the same category removes the tag instead, so no tag appears twice. Repeating a request changes nothing. Success is 200 with `{"dream":{…}}`. 409 `invalid_state` without a current organization (none yet, or outdated after a text edit), 400 for an unknown category, a missing `original_text` or one that matches no tag, or an empty summary, 413 over 60 characters for a tag or 600 for a summary.
 
-Corrections are kept apart from the generated rows, so a retry or a new organization never overwrites them, and they are dropped with the organization when the dream's text changes. Each change raises the organization's revision, marks analyses that were given the description as outdated, and, for a tag, removes the tag from its pattern group (its texts are rewritten at the next refresh) and indexes and matches the dream again from the corrected text. A summary correction schedules no new work.
+Corrections are kept apart from the generated rows, so a retry or a new organization never overwrites them, and they are dropped with the organization when the dream's text changes. Each change raises the organization's revision, marks analyses that were given the description as outdated, and removes the tag from its pattern group (its texts are rewritten at the next refresh) and indexes and matches the dream again from the corrected text.
 
 ## Analysis
 
@@ -159,10 +160,17 @@ After `organize` ends (completed, or failed for any reason but a limit), the wor
  "sections": [{"kind": "waking_life_connections", "text": "The deadline may echo the rush.", "citations": ["DREAM", "M1"]}],
  "withheld": 0, "removed_sources": 0, "dream_date": "2026-10-15", "mood": "anxious", "model": "gemini-3.1-flash-lite", "instruction_version": "analyze-1", "created_at": 1760371200000,
  "context": [{"label": "DREAM", "kind": "dream", "source_id": "9f1e…", "source_revision": 2, "source_date": "2026-10-15", "available": true, "cut_to": null},
-             {"label": "M1", "kind": "memory", "source_id": "77aa…", "source_revision": 1, "source_date": "2026-10-13", "available": true, "cut_to": null}]}
+             {"label": "M1", "kind": "memory", "source_id": "77aa…", "source_revision": 1, "source_date": "2026-10-13", "available": true, "cut_to": null, "title": "Exam week"}]}
 ```
 
-Section kinds, in stored order: `what_happened` and `reflection_questions` (always), `emotional_movement`, `waking_life_connections` (only with a life note), `themes_and_readings`, `threat_and_response`, `related_dreams` (only with an earlier dream). Every citation was checked against the supplied labels; sections that failed even after one repair call are left out and counted in `withheld`. Context: `DREAM`, `DESC` (summary and tags), up to 4 life notes (`M1`…) chosen by shared terms and date windows, and up to 3 earlier dreams (`D1`…) that share at least two terms; none of the notes or earlier dreams when the history switch in Settings is off, or when a note's or dream's own switch excludes it. The title is never sent. `available` is false once a source has changed; a source excluded now has no entry and is counted in `removed_sources`, as is a deleted one.
+Section kinds, in stored order: `what_happened` and `reflection_questions` (always), `emotional_movement`, `waking_life_connections` (only with a life note), `themes_and_readings`, `threat_and_response`, `related_dreams` (only with an earlier dream). Every citation was checked against the supplied labels; sections that failed even after one repair call are left out and counted in `withheld`. Context: `DREAM`, `DESC` (summary and tags), up to 4 life notes (`M1`…) chosen by shared terms and date windows, and up to 3 earlier dreams (`D1`…) that share at least two terms; none of the notes or earlier dreams when the history switch in Settings is off, or when a note's or dream's own switch excludes it. The title is never sent. A life note entry carries the note's current `title` (null when untitled) for the app to name it by; it is not sent to the model either. `available` is false once a source has changed; a source excluded now has no entry and is counted in `removed_sources`, as is a deleted one.
+
+Each life note entry also carries `choice`: `"added"` when the user added it, `"removed"` when the user took it out since this analysis ran (it stays listed until the next run), or null. `pending_notes` lists the added notes this analysis has not used yet, as `[{"source_id", "title", "source_date"}]`. It is empty when the history switch is off, because no note is sent then.
+
+`PUT /v1/dreams/{id}/analysis/notes/{memory_id}` with `{"choice": "added" | "removed"}` records the user's choice for that dream, and `DELETE` on the same path clears it, so the note goes back to the automatic pick. Both answer with the `GET /v1/dreams/{id}/analysis` body.
+- Added notes, at most `MAX_ADDED_MEMORIES` (4), come first as M1… on top of the up to 4 automatic ones. They skip the date and shared-term rules. A removed note is never picked automatically.
+- A changed choice marks the analysis `outdated` and runs nothing; the next refresh uses it. A choice changed while an analysis is running is saved, and that analysis is then marked `outdated` instead of being retried.
+- Errors: 400 for any other choice; 403 `not_permitted` when the dream's `analysis` switch is off; 404 for a dream or note that isn't the user's; 409 `not_permitted` when adding a note whose "Allow AI use" is off; 409 `too_many` when adding a fifth note. Notes whose "Allow AI use" was turned off after they were added don't count toward the limit and are never sent.
 
 `status` becomes `outdated` when the dream's text, mood or date changes or a source changes. Excluding a note (its "Allow future AI context" off) or an earlier dream (its `history` switch off) removes the sections that cite it; deleting it removes every section. The user then refreshes: `POST /v1/dreams/{id}/analysis/refresh` with `{"refresh_id": "<new UUID>"}` answers 202 with the scheduled `task`, or 200 with work already on its way or the task of a repeated `refresh_id`; 403 `not_permitted` when the dream's `analysis` switch is off, 409 when it has no text, 429 at the daily limit.
 
@@ -202,7 +210,7 @@ Pattern discovery runs by itself: after organization, `index_dream` embeds the d
 
 `kind` is `recurring` from 3 supporting dreams, `related` from 2; smaller groups are not shown, and `insufficient_history` is true without findings. `supporting_dreams` counts distinct dreams; `period_count` of `eligible_dreams` (dreams with text whose `patterns` and `analysis` switches are on, dated in the period) and the previous period of equal length give `trend` (`more_often_recorded_recently`, `less_often_recorded_recently`, `same`, or null). `status` is `refreshing`, with `explanation` null, while the evidence differs from what the explanation was written for; opening the screen then schedules one refresh unless that evidence was already tried or the newest refresh failed. `available` is false when the server's vector extension did not load: stored findings still show, nothing new is matched.
 
-All three actions return the patterns response. `PUT …/label` with `{"label": "…"}` sets the user's own label (null or empty removes it; at most 60 characters); it is never sent to the AI. `POST …/dismiss` with `{"dream_id": "…", "note": "…"}` removes the dream from the group for good: it is never matched back into that group, nor grouped again with the group's other dreams; repeating it changes only the note, and an empty note removes it. 409 when the dream does not support the group. `POST …/split` with `{"dream_ids": […], "label": "…", "note": "…"}` moves those dreams into a new group and keeps both sides apart from then on; 409 unless every listed dream supports the group and one remains, so a repeat answers 409. Notes are at most 300 characters (413) and are sent with the group to later matching while the dream they name is not excluded. Editing a member dream, turning its `patterns` or `analysis` switch off, or deleting it removes the AI-written texts of its groups at once; deleting it also empties the notes of splits it took part in.
+All three actions return the patterns response. `PUT …/label` with `{"label": "…"}` sets the user's own label (null or empty removes it; at most 60 characters); it is never sent to the AI. `POST …/dismiss` with `{"dream_id": "…", "note": "…"}` removes the dream from the group for good: it is never matched back into that group, nor grouped again with the group's other dreams; repeating it changes only the note, and an empty note removes it. 409 when the dream does not support the group. `POST …/split` with `{"dream_ids": […], "label": "…", "note": "…"}` moves those dreams into a new group and keeps both sides apart from then on; 409 unless every listed dream supports the group and one remains, so a repeat answers 409. Notes are at most 300 characters (413) and are sent with the group to later matching while the dream they name is not excluded. Editing a member dream, turning its `patterns` or `analysis` switch off, or deleting it marks its groups `refreshing` at once: the explanation is withheld and rewritten by the next refresh, while the label, description and member texts stay until it replaces them (6 November 2026); deleting it also empties the notes of splits it took part in.
 
 ## Device settings and deletion
 
@@ -227,3 +235,15 @@ curl --cacert backend/.local/server.crt \
 ```
 
 Use the returned revision on edit. Use the same credential and ID for GET/DELETE. A separate test UUID has separate settings, profile, journals and notes. The runnable smoke test `backend/tests/smoke_https.py` exercises these operations with invented data and deletes its temporary user afterwards.
+
+## Manual tag library
+
+`GET /v1/tag-library` returns `{"tags":[{"id","text","color"}]}` for the current journal. `POST /v1/tag-library` with `{"text":"Home"}` creates a tag (201) or reuses an existing case-insensitive, whitespace-normalized name (200), returning `{"tag":{…}}`. Names contain 1–60 characters. The stable color is one of `sage`, `blue`, `rose`, `amber`, `violet`, `teal`.
+
+`PUT /v1/tag-library/{id}` with `{"text":"New name"}` renames the tag everywhere it is attached and returns the library; a duplicate name returns 409. `DELETE /v1/tag-library/{id}` returns 204 and removes its associations from dreams, without touching dream text or AI-generated tags.
+
+Dream responses include `custom_tags`. `PUT /v1/dreams/{id}/tags` with `{"tag_ids":["<UUID>"]}` replaces the dream's manual selection and returns the dream. The normal dream save also accepts optional `tag_ids`, allowing new entries to save their text and tags atomically. Omitting this field preserves the selection; an empty list clears it. Up to 50 owned tags may be attached; unavailable/foreign IDs return 404 without partial changes. Manual tags appear in journal rows and tag filters independently of AI output. None of these operations schedules AI generation.
+
+Schema 8 includes `user_tags`, `dream_user_tags` and `imported_tag_links` with cascading journal/dream deletion. The phone's local draft schema 2 adds nullable `tag_ids`, preserving version 1 drafts. Drag grouping, default libraries and AI selection/recommendation are outside this increment.
+
+Existing current dream tags are imported into the library by normalized name and shown as selected on their source dreams. Journal rows, detail selection and filters share `visible_user_tags`. Import links preserve original categories and stop deleted or deselected tags reappearing on reload; obsolete AI output stops contributing its automatic associations. Renaming a library tag updates its displayed name on every linked dream without changing original AI output or triggering generation. The picker uses a dark system blur material.

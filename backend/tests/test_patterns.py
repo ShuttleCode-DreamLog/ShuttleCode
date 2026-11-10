@@ -300,7 +300,7 @@ async def test_decision_checks_and_no_merging(client, clock, ai):
     await dream(client, headers, user, 'zebra')
     assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_memberships WHERE dream_id=?', (unlabeled,))
     provenance = await db.rwdb.execute_fetchall('SELECT model,instruction_version FROM pattern_memberships WHERE user_id=? UNION SELECT model,instruction_version FROM pattern_groups WHERE user_id=?', (user, user))
-    assert {tuple(row) for row in provenance} <= {('test-text-model', 'match-1'), ('test-text-model', 'findings-1')}
+    assert {tuple(row) for row in provenance} <= {('test-text-model', 'match-1'), ('test-text-model', 'findings-2')}
 
 
 async def test_findings_counts_thresholds_and_trend(client, clock, ai):
@@ -341,11 +341,18 @@ async def test_refresh_number_check_no_repeat_and_one_more_try(client, clock, ai
         await patterns.clear_group_texts(connection, finding['group_id'])
         await patterns.schedule_refresh(connection, user)
     await run_all()
+    # The group keeps its name while the refresh fails, and a group with a name gets no second paid try (wiki 4.8.6, step 5).
     plain = (await found(client, headers))['findings'][0]
-    assert (plain['label'], plain['explanation'], plain['status'], await text_units(user)) == (None, 'Found in 3 recorded dreams.', 'current', units + 2)
+    assert (plain['label'], plain['explanation'], plain['status'], await text_units(user)) == ('theme exam', 'Found in 3 recorded dreams.', 'current', units + 1)
+    await db.rwdb.execute('UPDATE pattern_groups SET label=NULL,description=NULL,evidence_key=NULL,tried_key=NULL WHERE id=?', (finding['group_id'],))
+    async with db.tx() as connection:
+        await patterns.schedule_refresh(connection, user)
+    await run_all()
+    nameless = (await found(client, headers))['findings'][0]
+    assert (nameless['label'], nameless['status'], await text_units(user)) == (None, 'current', units + 3)
     await found(client, headers)
     await found(client, headers)
-    assert len(await tasks_of('refresh_findings', user=user)) == refreshes + 1
+    assert len(await tasks_of('refresh_findings', user=user)) == refreshes + 2
 
 
 async def test_refresh_combining_and_group_deletion(client, clock, ai):
@@ -382,21 +389,21 @@ async def test_edit_delete_and_exclusion_invalidate_findings(client, clock, ai):
     await client.put(f'/v1/dreams/{third}', headers=headers, json={'base_revision': 1, 'text': 'Now a different account.', 'dream_date': '2026-10-10'})
     edited = (await found(client, headers))['findings'][0]
     assert (edited['status'], edited['explanation'], edited['supporting_dreams']) == ('refreshing', None, 2) and third not in [e['dream_id'] for e in edited['examples']]
+    # The label, description and member texts still describe the members that remain, so they stay until the refresh rewrites them (6 November 2026).
     group = (await db.rwdb.execute_fetchall('SELECT * FROM pattern_groups WHERE id=?', (finding['group_id'],)))[0]
-    assert (group['label'], group['description'], group['explanation']) == (None, None, None)
-    assert not await db.rwdb.execute_fetchall("SELECT 1 FROM pattern_memberships WHERE shared_element IS NOT NULL AND group_id=?", (finding['group_id'],))
+    assert (group['label'], group['description'], group['explanation'], edited['label']) == ('zebra marker theme', 'zebra marker described', None, 'zebra marker theme')
+    assert await db.rwdb.execute_fetchall("SELECT 1 FROM pattern_memberships WHERE shared_element IS NOT NULL AND group_id=?", (finding['group_id'],))
     await client.put(f'/v1/patterns/groups/{finding["group_id"]}/label', headers=headers, json={'label': 'Mine'})
     await client.delete(f'/v1/dreams/{second}', headers=headers)
     small = await db.rwdb.execute_fetchall('SELECT label,description,explanation,user_label FROM pattern_groups WHERE id=?', (finding['group_id'],))
-    assert tuple(small[0]) == (None, None, None, 'Mine') and (await found(client, headers))['findings'] == []
-    assert not await db.rwdb.execute_fetchall("SELECT 1 FROM pattern_groups WHERE label LIKE '%marker%' OR description LIKE '%marker%' OR explanation LIKE '%marker%'")
-    assert not await db.rwdb.execute_fetchall("SELECT 1 FROM pattern_memberships WHERE shared_element LIKE '%marker%' OR difference LIKE '%marker%'")
+    assert tuple(small[0]) == ('zebra marker theme', 'zebra marker described', None, 'Mine') and (await found(client, headers))['findings'] == []
     headers, user = person()
     dreams_ = [await dream(client, headers, user, 'dog', f'2026-10-0{day}') for day in (1, 2, 3)]
     await run_all()
     excluded_group = (await found(client, headers))['findings'][0]['group_id']
     await client.put(f'/v1/dreams/{dreams_[0]}/permissions', headers=headers, json={'patterns': False})
-    assert tuple((await db.rwdb.execute_fetchall('SELECT label,description,explanation FROM pattern_groups WHERE id=?', (excluded_group,)))[0]) == (None, None, None)
+    excluded_row = (await db.rwdb.execute_fetchall('SELECT label,description,explanation FROM pattern_groups WHERE id=?', (excluded_group,)))[0]
+    assert excluded_row['label'] and excluded_row['description'] and excluded_row['explanation'] is None
     excluded = await found(client, headers)
     assert excluded['findings'][0]['supporting_dreams'] == 2 and excluded['eligible_dreams'] == 2 and dreams_[0] not in [e['dream_id'] for e in excluded['findings'][0]['examples']]
     calls = len(ai.calls)
@@ -726,3 +733,40 @@ async def test_search_narrows_by_every_tag_then_ranks_by_meaning(client, clock, 
     literal = (await client.post('/v1/dreams/search', headers=headers, json={'query': 'quiet lake'})).json()
     # The frozen clock gives both dreams one creation time, so their literal order comes down to their random IDs.
     assert not literal['ranked'] and sorted(i['id'] for i in literal['items']) == sorted([spoken, lake]) and {i['similarity'] for i in literal['items']} == {None}
+
+
+async def test_a_lost_member_keeps_the_name_and_quoted_evidence_still_counts(client, clock, ai):
+    headers, user = person()
+    await dream(client, headers, user, 'lake')
+    await dream(client, headers, user, 'lake')
+    third = await dream(client, headers, user, 'lake')
+    group_id = (await found(client, headers))['findings'][0]['group_id']
+    ai.findings = lambda content: {'groups': [dict(entry, label='lakes again') for entry in sensible_findings(content)['groups']]}
+    await client.delete(f'/v1/dreams/{third}', headers=headers)
+    kept = (await found(client, headers))['findings'][0]
+    assert (kept['label'], kept['status'], kept['explanation'], kept['supporting_dreams']) == ('theme lake', 'refreshing', None, 2)
+    assert all(example['shared_element'] for example in kept['examples'])
+    await run_all()
+    renamed = (await found(client, headers))['findings'][0]
+    assert (renamed['label'], renamed['status']) == ('lakes again', 'current')
+    instruction = [call for call in ai.calls if call.name == 'findings'][-1].instruction
+    assert 'G label' in instruction and 'E label' in instruction
+    # A group without any texts, as one cleared before 6 November 2026, is named although the model quotes the excerpt, or wraps the labels, as evidence.
+    def quoting(content):
+        answer = sensible_findings(content)
+        for entry in answer['groups']:
+            block = next(block for block in content.split('\n\n') if block.startswith(entry['group'] + ':'))
+            excerpts = re.findall(r'^E\d+: .*?\. Excerpt: (.*)$', block, re.M)
+            for member, excerpt in zip(entry['members'], excerpts):
+                member['evidence'] = excerpt.upper() if member['evidence'] == 'E1' else f"evidence {member['evidence']}:"
+            entry['group'] = f"group {entry['group']}"
+            entry['label'] = 'quoted lakes'
+        return answer
+    ai.findings = quoting
+    await db.rwdb.execute('UPDATE pattern_groups SET label=NULL,description=NULL,evidence_key=NULL,tried_key=NULL WHERE id=?', (group_id,))
+    await db.rwdb.execute('UPDATE pattern_memberships SET shared_element=NULL,difference=NULL WHERE group_id=?', (group_id,))
+    async with db.tx() as connection:
+        await patterns.schedule_refresh(connection, user)
+    await run_all()
+    named = (await found(client, headers))['findings'][0]
+    assert (named['label'], named['status']) == ('quoted lakes', 'current') and all(example['shared_element'] == 'shared situation' for example in named['examples'])

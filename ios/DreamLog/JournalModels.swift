@@ -37,6 +37,7 @@ nonisolated struct Dream: Codable, Sendable, Identifiable {
     var organization: Organization?
     var createdAt: Date
     var updatedAt: Date
+    var customTags: [LibraryTag]? = nil
 }
 
 nonisolated enum TaskType: String, Codable, Sendable {
@@ -70,7 +71,7 @@ nonisolated enum OutputStatus: String, Codable, Sendable {
 }
 
 nonisolated enum TagCategory: String, Codable, Sendable {
-    case person, place, object, action, emotion, theme, unknown
+    case person, place, object, action, emotion, theme, custom, unknown
     init(from decoder: any Decoder) throws { self = TagCategory(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown }
 }
 
@@ -94,12 +95,11 @@ nonisolated struct Organization: Codable, Sendable {
     var status: OutputStatus
     var dreamRevision: Int
     var summary: String
-    var summaryCorrected: Bool
     var tags: [Tag]
     var createdAt: Date
 }
 
-nonisolated struct DreamCorrection: Encodable { var category: String; var originalText: String?; var text: String }
+nonisolated struct DreamCorrection: Encodable { var category: String; var originalText: String; var text: String }
 
 nonisolated enum ServerStatus: String, Codable, Sendable {
     case ready, processing, attention, unknown
@@ -156,6 +156,7 @@ nonisolated struct Draft: Codable, Sendable {
     var audioSendStarted = false
     var unconfirmed = false
     var sentText: String?
+    var tagIds: [String]?
     var updatedAt = Date.now
 
     init(dreamId: String, dreamDate: String) { self.dreamId = dreamId; self.dreamDate = dreamDate }
@@ -163,9 +164,10 @@ nonisolated struct Draft: Codable, Sendable {
         dreamId = dream.id; text = dream.text; title = dream.title; mood = dream.mood
         dreamDate = dream.dreamDate; source = dream.source; permissions = dream.permissions
         baseRevision = dream.revision; unsent = false
+        tagIds = dream.customTags?.map(\.id)
     }
-    var save: DreamSave { DreamSave(baseRevision: baseRevision, text: text, dreamDate: dreamDate, title: title, mood: mood, source: source, permissions: baseRevision == 0 ? permissions : nil) }
-    func matches(_ dream: Dream) -> Bool { text == dream.text && title == dream.title && mood == dream.mood && dreamDate == dream.dreamDate }
+    var save: DreamSave { DreamSave(baseRevision: baseRevision, text: text, dreamDate: dreamDate, title: title, mood: mood, source: source, permissions: baseRevision == 0 ? permissions : nil, tagIds: tagIds) }
+    func matches(_ dream: Dream) -> Bool { text == dream.text && title == dream.title && mood == dream.mood && dreamDate == dream.dreamDate && (tagIds == nil || Set(tagIds ?? []) == Set(dream.customTags?.map(\.id) ?? [])) }
 }
 
 nonisolated struct DreamSave: Encodable {
@@ -176,7 +178,8 @@ nonisolated struct DreamSave: Encodable {
     var mood: Mood?
     var source: DreamSource
     var permissions: Permissions?
-    enum CodingKeys: String, CodingKey { case baseRevision = "base_revision", text, dreamDate = "dream_date", title, mood, source, permissions }
+    var tagIds: [String]? = nil
+    enum CodingKeys: String, CodingKey { case baseRevision = "base_revision", text, dreamDate = "dream_date", title, mood, source, permissions, tagIds = "tag_ids" }
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(baseRevision, forKey: .baseRevision)
@@ -186,6 +189,7 @@ nonisolated struct DreamSave: Encodable {
         try container.encode(mood, forKey: .mood)
         try container.encode(source, forKey: .source)
         if let permissions { try container.encode(permissions, forKey: .permissions) }
+        if let tagIds { try container.encode(tagIds, forKey: .tagIds) }
     }
 }
 

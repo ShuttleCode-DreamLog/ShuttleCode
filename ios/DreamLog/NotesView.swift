@@ -7,21 +7,25 @@ struct NotesView: View {
     @Environment(AppModel.self) private var app
     @State private var model = NotesModel()
     @State private var path: [String] = []
-    @State private var creating: EntryRoute?
+    @State private var query = ""
     var body: some View {
+        @Bindable var app = app
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 13) {
+                    // The search box, count line and empty card follow the Journal page's so both lists search alike.
                     Eyebrow("Your waking world")
                     PageHeading("Small moments matter.")
+                    TextField("Search notes…", text: $query).field().submitLabel(.search).onSubmit(search).accessibilityIdentifier("noteSearch")
                     if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
-                    if model.items.isEmpty && !model.isLoading { EmptyCard("No notes yet") }
+                    Hint(countLine)
+                    if model.items.isEmpty && !model.isLoading { EmptyCard(model.query.isEmpty ? "No notes yet" : "No recorded note matches") }
                     ForEach(model.items) { note in NavigationLink(value: note.id) { NoteCard(note: note) }.buttonStyle(.plain) }
                     if model.hasMore {
                         Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading)
                     }
                     if model.isLoading { ProgressView().frame(maxWidth: .infinity) }
-                    Button("Add note") { creating = EntryRoute(id: newID()) }.buttonStyle(.primaryWide).accessibilityIdentifier("addNote")
+                    Button("Add note") { app.newNote = EntryRoute(id: newID()) }.buttonStyle(.primaryWide).accessibilityIdentifier("addNote")
                     HistoryToggle().font(.callout).switchRow()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -30,14 +34,66 @@ struct NotesView: View {
             .dreamPage()
             .page(Header("Life notes") { HomeButton() })
             .navigationDestination(for: String.self) { NoteEditorView(id: $0) }
-            .sheet(item: $creating, onDismiss: { Task { await model.load(app) } }) { entry in
-                NavigationStack { NoteEditorView(id: entry.id, newEntry: true) }
-            }
             .task { await model.load(app) }
             .reloadable { await model.load(app) }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await model.load(app) } } }
             .onChange(of: app.refreshes) { Task { await model.load(app) } }
+            .onChange(of: query) { _, value in
+                if value.isEmpty && !model.query.isEmpty { model.query = ""; Task { await model.load(app) } }
+            }
         }
+        // On the stack, not its root page, so the bar's + also works while a note is open.
+        .sheet(item: $app.newNote, onDismiss: { Task { await model.load(app) } }) { entry in
+            NavigationStack { NoteEditorView(id: entry.id, newEntry: true) }
+        }
+    }
+    private func search() {
+        guard !model.isLoading else { return }
+        model.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { await model.load(app) }
+    }
+    private var countLine: String {
+        let count = model.items.count
+        let entries = "\(count)\(model.hasMore ? "+" : "") \(count == 1 ? "note" : "notes")"
+        return (model.query.isEmpty ? "All notes" : "Notes matching “\(model.query)”") + " · \(entries)" + (model.ranked ? " · by similarity" : "")
+    }
+}
+
+// Picks a note to add to a dream's analysis; notes already listed and notes kept out of AI processing are left out (Re-Design list, 6 November 2026).
+struct NotePickerView: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    let excluded: Set<String>
+    let pick: (String) -> Void
+    @State private var model = NotesModel()
+    @State private var query = ""
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 13) {
+                TextField("Search notes…", text: $query).field().submitLabel(.search).onSubmit(search).accessibilityIdentifier("pickerSearch")
+                if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
+                let notes = model.items.filter { $0.allowAnalysis && !excluded.contains($0.id) }
+                if notes.isEmpty && !model.isLoading { EmptyCard(model.query.isEmpty ? "No other notes to add" : "No recorded note matches") }
+                ForEach(notes) { note in Button { pick(note.id); dismiss() } label: { NoteCard(note: note) }.buttonStyle(.plain) }
+                if model.hasMore {
+                    Button("Load more") { Task { await model.load(app, more: true) } }.buttonStyle(.secondary).disabled(model.isLoading)
+                }
+                if model.isLoading { ProgressView().frame(maxWidth: .infinity) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+        .dreamPage()
+        .page(Header("Add life note", leading: { BackButton(label: "Done") { dismiss() } }, trailing: { EmptyView() }), aboveBar: false)
+        .task { await model.load(app) }
+        .onChange(of: query) { _, value in
+            if value.isEmpty && !model.query.isEmpty { model.query = ""; Task { await model.load(app) } }
+        }
+    }
+    private func search() {
+        guard !model.isLoading else { return }
+        model.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { await model.load(app) }
     }
 }
 
@@ -65,7 +121,6 @@ struct NoteEditorView: View {
     @State private var confirmingDelete = false
     @State private var confirmingClose = false
     @State private var showingSaveError = false
-    @State private var showMore = false
     @FocusState private var writingText: Bool
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var removingPhoto: String?
@@ -83,6 +138,7 @@ struct NoteEditorView: View {
                 }
                 if model.isEditing { editingBlock } else if let stored = model.stored { readingBlock(stored) }
                 photosBlock
+                aiUseBlock
                 if model.isEditing {
                     HStack(spacing: 10) {
                         Button("Cancel") { cancel() }.buttonStyle(.secondary)
@@ -130,7 +186,7 @@ struct NoteEditorView: View {
     }
     @ViewBuilder private var editingBlock: some View {
         @Bindable var editor = model
-        TextField("Title (optional)", text: $editor.value.title).font(.heading).accessibilityIdentifier("noteTitle")
+        TextField("Title (optional)", text: $editor.value.title).font(.heading).field().accessibilityIdentifier("noteTitle")
         Toggle("Event has a date", isOn: Binding(get: { model.value.eventDate != nil }, set: { enabled in
             model.value.eventDate = enabled ? journalDate() : nil
             model.value.eventPrecision = enabled ? .exact : .unknown
@@ -151,18 +207,15 @@ struct NoteEditorView: View {
             }
             .field()
         Hint("\(model.value.text.unicodeScalars.count) / \(app.limits.maxMemoryChars) characters")
-        DisclosureGroup("More", isExpanded: $showMore) {
-            VStack(alignment: .leading, spacing: 4) {
-                if model.value.eventDate != nil {
-                    Picker("Date precision", selection: $editor.value.eventPrecision) {
-                        Text("Exact").tag(EventPrecision.exact)
-                        Text("Approximate").tag(EventPrecision.approximate)
-                    }.pickerStyle(.segmented).padding(.vertical, 8)
-                }
-                Toggle("Still going on", isOn: $editor.value.isOngoing).switchRow()
-                Toggle("Allow AI use", isOn: $editor.value.allowAnalysis).switchRow()
-            }.padding(.top, 8)
-        }.font(.callout).padding(.top, 8)
+        VStack(alignment: .leading, spacing: 4) {
+            if model.value.eventDate != nil {
+                Picker("Date precision", selection: $editor.value.eventPrecision) {
+                    Text("Exact").tag(EventPrecision.exact)
+                    Text("Approximate").tag(EventPrecision.approximate)
+                }.pickerStyle(.segmented).padding(.vertical, 8)
+            }
+            Toggle("Still going on", isOn: $editor.value.isOngoing).switchRow()
+        }.font(.callout)
         if model.conflict {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Stored note changed").font(.heading)
@@ -181,20 +234,27 @@ struct NoteEditorView: View {
         HStack(alignment: .firstTextBaseline) {
             Hint(stored.eventDate.map(displayDate) ?? stored.recordedAt.formatted(date: .abbreviated, time: .omitted))
             Spacer()
-            Button("Edit") { model.isEditing = true }.buttonStyle(.secondary)
+            Button("Edit", systemImage: "pencil") { model.isEditing = true }.buttonStyle(.secondary)
         }
         Text(stored.text).font(.callout).textSelection(.enabled)
-        DisclosureGroup("More", isExpanded: $showMore) {
-            VStack(alignment: .leading, spacing: 0) {
-                LabeledRow("Recorded") { Text(stored.recordedAt.formatted(date: .abbreviated, time: .shortened)).font(.callout) }
-                if let date = stored.eventDate {
-                    LabeledRow("Event date") { Text(displayDate(date)).font(.callout) }
-                    LabeledRow("Precision") { Text(stored.eventPrecision.rawValue.capitalized).font(.callout) }
-                }
-                LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
-                LabeledRow("Allow AI use") { Text(stored.allowAnalysis ? "On" : "Off").font(.callout) }
-            }.padding(.top, 8)
-        }.font(.callout).padding(.top, 8)
+        VStack(alignment: .leading, spacing: 0) {
+            LabeledRow("Recorded") { Text(stored.recordedAt.formatted(date: .abbreviated, time: .shortened)).font(.callout) }
+            if let date = stored.eventDate {
+                LabeledRow("Event date") { Text(displayDate(date)).font(.callout) }
+                LabeledRow("Precision") { Text(stored.eventPrecision.rawValue.capitalized).font(.callout) }
+            }
+            LabeledRow("Ongoing") { Text(stored.isOngoing ? "Yes" : "No").font(.callout) }
+        }.padding(.top, 8)
+    }
+    // AI use is the note page's last section (Re-Design list, AI use), with the controls the More fold had: the switch while editing, its state while reading.
+    @ViewBuilder private var aiUseBlock: some View {
+        @Bindable var editor = model
+        if model.isEditing || model.stored != nil { Heading("AI use") }
+        if model.isEditing {
+            Toggle("Allow AI use", isOn: $editor.value.allowAnalysis).font(.callout).switchRow()
+        } else if let stored = model.stored {
+            LabeledRow("Allow AI use") { Text(stored.allowAnalysis ? "On" : "Off").font(.callout) }
+        }
     }
     @ViewBuilder private var photosBlock: some View {
         let saved = model.stored?.photos ?? []

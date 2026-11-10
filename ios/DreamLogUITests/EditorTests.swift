@@ -55,14 +55,10 @@ final class EditorTests: XCTestCase {
         app.buttons["tab_journal"].tap()
         app.buttons["tab_add"].tap()
         let title = "UI dream \(UUID().uuidString)"
-        // The title lives in the header: tap it to name the dream before the first sentence names it.
-        let titleButton = app.buttons["dreamTitle"]
-        XCTAssertTrue(titleButton.waitForExistence(timeout: 5))
-        titleButton.tap()
-        let titleField = app.alerts.textFields.firstMatch
-        XCTAssertTrue(titleField.waitForExistence(timeout: 3))
-        titleField.typeText(title)
-        app.alerts.buttons["Save"].tap()
+        // The title box sits above the text: naming the dream there keeps the AI from naming it.
+        let titleField = app.textFields["dreamTitle"]
+        XCTAssertTrue(titleField.waitForExistence(timeout: 5))
+        titleField.tap(); titleField.typeText(title)
         let journalEditor = app.textViews["journalText"]
         journalEditor.tap(); journalEditor.typeText("Original invented dream.")
         XCTAssertFalse(app.buttons["saveJournal"].exists)
@@ -81,6 +77,8 @@ final class EditorTests: XCTestCase {
         XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 5))
         let deleteDream = app.buttons["Delete Dream"]
         for _ in 0..<10 where !(deleteDream.exists && deleteDream.isHittable) { app.swipeUp() }
+        // Delete Dream ends the page; the drawn bar covers the page's last stretch until it is scrolled to the end.
+        app.swipeUp()
         deleteDream.tap()
         let confirmDelete = app.sheets.firstMatch.buttons["Delete Dream"]
         if confirmDelete.waitForExistence(timeout: 3) { confirmDelete.tap() } else { app.buttons.matching(identifier: "Delete Dream").element(boundBy: 1).tap() }

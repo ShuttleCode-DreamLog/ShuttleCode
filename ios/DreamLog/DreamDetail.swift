@@ -51,6 +51,18 @@ final class AnalysisModel {
         case let .failure(failure): error = failure.code == "cap_reached" || failure.code == "ceiling_reached" ? failureText(failure.code, .analyze) : failure.message
         }
     }
+    func choose(_ app: AppModel, memory: String, choice: String?) async {
+        guard !isSending, let client = app.client else { return }
+        if epoch == nil { epoch = app.journalEpoch }
+        isSending = true; changes += 1
+        defer { isSending = false }
+        let result = await client.chooseAnalysisNote(dreamId, memoryID: memory, choice: choice)
+        guard current(app) else { return }
+        switch result {
+        case let .success(value): analysis = value.analysis; task = value.task; error = nil
+        case let .failure(failure): error = failure.message
+        }
+    }
     func retry(_ app: AppModel) async {
         guard !isSending, let failed = task, let client = app.client else { return }
         if epoch == nil { epoch = app.journalEpoch }
@@ -65,10 +77,6 @@ final class AnalysisModel {
     }
 }
 
-nonisolated enum CorrectionTarget: Identifiable {
-    case summary, tag(Tag)
-    var id: String { if case let .tag(tag) = self { tag.id } else { "summary" } }
-}
 
 // The six switches (wiki 4.5.8); their explanatory lines are not shown, the privacy notice covers what each AI use sends.
 let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, title: String)] = [
@@ -82,7 +90,22 @@ let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, titl
 let historyOffLine = "Turning this off removes the parts of analyses that cite it and starts the discussions that used it afresh. Turning it on again does not bring them back."
 let correctionLine = "A correction marks the analysis as outdated and starts the discussion afresh."
 
-// The prototype's dream page: date and Delete, tags, Original text, Summary, Analysis; the sources and AI switches follow below.
+// The dream page's sections a user can reorder (Re-Design list, AI use); the date row stays first and AI use stays last.
+nonisolated enum DreamSection: String, CaseIterable, Identifiable {
+    case tags, originalText, summary, analysis
+    var id: String { rawValue }
+    var title: String { switch self { case .tags: "Tags"; case .originalText: "Original text"; case .summary: "Summary"; case .analysis: "Analysis" } }
+}
+let dreamSectionOrderKey = "dreamSectionOrder"
+// A stored order drops names it does not know and appends sections it lacks, so adding a section later keeps a user's order.
+nonisolated func dreamSections(_ stored: String) -> [DreamSection] {
+    let known = stored.split(separator: ",").compactMap { DreamSection(rawValue: String($0)) }
+    let unique = known.enumerated().filter { known.firstIndex(of: $0.element) == $0.offset }.map(\.element)
+    return unique + DreamSection.allCases.filter { !unique.contains($0) }
+}
+
+// The prototype's dream page: date and Edit, the sections in the user's order, AI use, then Delete Dream. Edit and Delete sit as on
+// a life note, and Edit opens the title and text together.
 struct DreamDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -90,12 +113,16 @@ struct DreamDetailView: View {
     @State private var analysis: AnalysisModel
     @State private var editing = false
     @State private var showSwitches = false
-    @State private var showMore = false
+    @State private var showingSources = false
+    @State private var pickingNote = false
+    @State private var arranging = false
+    @State private var collapsed: Set<String> = []
+    @AppStorage(dreamSectionOrderKey) private var sectionOrder = ""
     @State private var confirmingDelete = false
     @State private var confirmingKeepOut = false
     @State private var confirmingHistoryOff = false
     @State private var confirmingRefresh = false
-    @State private var correcting: CorrectionTarget?
+    @State private var renaming: Tag?
     @State private var correctionText = ""
     let id: String
 
@@ -112,34 +139,14 @@ struct DreamDetailView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Hint(displayDate(dream.dreamDate) + (model.draft?.unsent == true ? " · Waiting to sync" : ""))
                         Spacer()
-                        Button("Delete Dream", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet)
-                    }
-                    tagsBlock(dream)
-                    Heading("Original text")
-                    Text(dream.text).font(.callout).textSelection(.enabled)
-                    if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
-                    Button("Edit text") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
-                    Heading("Summary")
-                    organizationBlock(dream)
-                    Heading("Analysis")
-                    analysisBlock(dream)
-                    if !dream.permissions.discussion { Hint("Discussion is off") }
-                    else if !dream.text.isEmpty {
-                        NavigationLink(value: Route.conversation(id, title: dream.title ?? "Dream")) {
-                            Label("Conversation analysis", systemImage: "bubble.left.and.bubble.right")
-                        }.buttonStyle(.primary).padding(.top, 8)
+                        Button("Edit", systemImage: "pencil") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
                     }
                     // Sources and the AI switches are kept off the prototype's page until asked for.
-                    DisclosureGroup("More", isExpanded: $showMore) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if let value = analysis.analysis {
-                                Text("Information used for this analysis").font(.callout.weight(.semibold)).padding(.top, 8)
-                                contextBlock(value, dream: dream)
-                            }
-                            Text("AI use").font(.callout.weight(.semibold)).padding(.top, 8)
-                            permissionsBlock(dream)
-                        }
-                    }.font(.callout).padding(.top, 14)
+                    ForEach(dreamSections(sectionOrder)) { section in sectionBlock(section, dream: dream) }
+                    Button("Arrange sections") { arranging = true }.buttonStyle(.quiet).padding(.top, 8).accessibilityIdentifier("arrangeSections")
+                    foldHeading("AI use", key: "aiUse")
+                    if !collapsed.contains("aiUse") { permissionsBlock(dream) }
+                    Button("Delete Dream", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet).padding(.top, 8)
                 } else if model.isLoading { ProgressView("Loading dream…") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -150,7 +157,53 @@ struct DreamDetailView: View {
         .sheet(isPresented: $editing, onDismiss: { Task { await load() } }) {
             NavigationStack { DreamEditorView(id: id, presented: true) }
         }
+        // The sheet is its own presentation, so it carries the routes its note and dream links open.
+        .sheet(isPresented: $showingSources, onDismiss: { Task { await load() } }) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let value = analysis.analysis, let dream = model.dream { contextBlock(value, dream: dream) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(24)
+                }
+                .dreamPage()
+                .page(Header("Information used", leading: { BackButton(label: "Done") { showingSources = false } }, trailing: { EmptyView() }), aboveBar: false)
+                .routeDestinations()
+                .sheet(isPresented: $pickingNote) {
+                    NavigationStack {
+                        NotePickerView(excluded: listedNotes) { memory in Task { await analysis.choose(app, memory: memory, choice: "added") } }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $arranging) {
+            NavigationStack {
+                List {
+                    ForEach(dreamSections(sectionOrder)) { Text($0.title) }
+                        .onMove { from, to in
+                            var order = dreamSections(sectionOrder)
+                            order.move(fromOffsets: from, toOffset: to)
+                            sectionOrder = order.map(\.rawValue).joined(separator: ",")
+                        }
+                    Button("Reset to default") { sectionOrder = "" }.disabled(sectionOrder.isEmpty)
+                }
+                .environment(\.editMode, .constant(.active))
+                .dreamPage()
+                .page(Header("Arrange sections", leading: { BackButton(label: "Done") { arranging = false } }, trailing: { EmptyView() }), aboveBar: false)
+            }
+            .presentationDetents([.medium])
+        }
         .task { await load() }
+        // While the summary and tags or the analysis are still being made on the server, the page waits and reads again, so the
+        // result appears by itself (wiki 4.4.6, rule 3); the wait ends with the page or the work.
+        .task(id: awaitingWork) {
+            var pause = 2
+            while awaitingWork, (try? await Task.sleep(for: .seconds(pause))) != nil {
+                await load()
+                pause = min(pause * 2, 15)
+            }
+        }
         .reloadable { await load() }
         .onChange(of: app.refreshes) { Task { await load() } }
         .confirmationDialog("Delete this dream? Deleting this dream also removes the analyses of other dreams and the discussion replies that were written with it.", isPresented: $confirmingDelete, titleVisibility: .visible) {
@@ -165,13 +218,16 @@ struct DreamDetailView: View {
         .confirmationDialog("A new analysis replaces this one and starts this dream's discussion afresh.\(allowance)", isPresented: $confirmingRefresh, titleVisibility: .visible) {
             Button("Update Analysis") { Task { await analysis.refresh(app) } }
         }
-        .alert(correctionTitle, isPresented: Binding(get: { correcting != nil }, set: { if !$0 { correcting = nil } }), presenting: correcting) { target in
+        .alert(renaming.map { "Rename “\($0.text)”" } ?? "", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }), presenting: renaming) { tag in
             TextField("New wording", text: $correctionText)
-            Button("Save") { Task { await saveCorrection(target) } }
+            Button("Save") { Task { await rename(tag) } }
             Button("Cancel", role: .cancel) {}
         } message: { _ in Text(correctionLine) }
     }
 
+    private var awaitingWork: Bool {
+        analysis.task?.inProgress == true || model.dream?.tasks.contains { $0.type == .organize && $0.inProgress } == true
+    }
     private func load() async {
         // An open editor owns this dream's draft until it closes.
         guard !editing else { return }
@@ -183,37 +239,60 @@ struct DreamDetailView: View {
         guard let text = app.me?.usage.first(where: { $0.kind == "text" }) else { return "" }
         return " About \(max(0, text.cap - text.used)) text generations are left today."
     }
-    private var correctionTitle: String {
-        if case let .tag(tag) = correcting { "Rename “\(tag.text)”" } else { "Correct the summary" }
-    }
 
     // Tags are pills; each opens its corrections, and a removed tag stays, struck through, until it is restored.
     @ViewBuilder private func tagsBlock(_ dream: Dream) -> some View {
-        if let organization = dream.organization {
-            let editable = organization.status == .current
-            Wrap(spacing: 6) {
-                ForEach(organization.tags.filter { !$0.removed }) { tag in
-                    Menu {
-                        Section("\(tag.category.rawValue.capitalized)\(tag.feeling == .inferred ? " · inferred" : "")\(tag.corrected ? " · your correction" : "") · “\(tag.excerpt)”") {
-                            Button("Show dreams with this tag", systemImage: "line.3.horizontal.decrease") { app.showJournal(tag: tag.text) }
-                            if editable {
-                                Button("Rename…", systemImage: "pencil") { correctionText = tag.text; correcting = .tag(tag) }
-                                if tag.corrected { Button("Restore “\(tag.originalText)”", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
-                                Button("Remove", systemImage: "minus.circle", role: .destructive) {
-                                    Task { await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: "")) }
-                                }
-                            }
-                        }
-                    } label: { Pill(tag.text) }
-                }
-                ForEach(organization.tags.filter(\.removed)) { tag in
-                    Menu {
-                        if editable { Button("Restore", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
-                    } label: { Pill(tag.originalText, struck: true) }
-                    .accessibilityLabel("Removed tag \(tag.originalText)")
+        TagSelectionControl(selectedIDs: dream.customTags?.map(\.id) ?? [], initialTags: dream.customTags ?? []) { ids in
+            await model.saveTags(app, ids: ids)
+        }
+    }
+
+    @ViewBuilder private func sectionBlock(_ section: DreamSection, dream: Dream) -> some View {
+        // Every section folds under its heading (Re-Design list, 6 November 2026); the tags get a heading so they can fold too.
+        if section == .analysis {
+            // Supporting life notes sit beside the analysis they informed (Re-Design list, Life notes 3).
+            HStack(alignment: .firstTextBaseline) {
+                foldHeading(section.title, key: section.rawValue)
+                Spacer()
+                if let value = analysis.analysis {
+                    Button("Supporting life notes (\(value.context.count { $0.kind == .memory } + (value.pendingNotes?.count ?? 0))) ›") { showingSources = true }
+                        .buttonStyle(.quiet).accessibilityIdentifier("analysisSources")
                 }
             }
-            .disabled(model.isSending)
+        } else {
+            foldHeading(section.title, key: section.rawValue)
+        }
+        if !collapsed.contains(section.rawValue) { sectionContent(section, dream: dream) }
+    }
+    private func foldHeading(_ title: String, key: String) -> some View {
+        let folded = collapsed.contains(key)
+        return Button { withAnimation(.snappy) { collapsed.formSymmetricDifference([key]) } } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "chevron.down").font(.callout.weight(.semibold)).rotationEffect(.degrees(folded ? -90 : 0)).foregroundStyle(Color.muted)
+                Heading(title)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(folded ? "Collapsed" : "Expanded")
+        .accessibilityIdentifier("fold-\(key)")
+    }
+    @ViewBuilder private func sectionContent(_ section: DreamSection, dream: Dream) -> some View {
+        switch section {
+        case .tags: tagsBlock(dream)
+        case .originalText:
+            Text(dream.text).font(.callout).textSelection(.enabled)
+            if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
+        case .summary: organizationBlock(dream)
+        case .analysis:
+            analysisBlock(dream)
+            // The discussion entry stays with the analysis it continues (wiki 4.6.6).
+            if !dream.permissions.discussion { Hint("Discussion is off") }
+            else if !dream.text.isEmpty {
+                NavigationLink(value: Route.conversation(id, title: dream.title ?? "Dream")) {
+                    Label("Conversation analysis", systemImage: "bubble.left.and.bubble.right")
+                }.buttonStyle(.primary).padding(.top, 8)
+            }
         }
     }
 
@@ -255,10 +334,6 @@ struct DreamDetailView: View {
             if let organization = dream.organization {
                 if organization.status != .current { Hint("Outdated after an edit") }
                 Text(organization.summary).font(.callout)
-                if organization.summaryCorrected { Hint("Your correction") }
-                if organization.status == .current {
-                    Button("Correct summary") { correctionText = organization.summary; correcting = .summary }.buttonStyle(.quiet)
-                }
             } else if organize == nil {
                 Hint(dream.permissions.analysis ? "No summary yet" : "Analysis is off")
             }
@@ -268,12 +343,9 @@ struct DreamDetailView: View {
     private func restore(_ tag: Tag) async {
         await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: tag.originalText))
     }
-    private func saveCorrection(_ target: CorrectionTarget) async {
+    private func rename(_ tag: Tag) async {
         let text = correctionText.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch target {
-        case .summary: if !text.isEmpty { await model.correct(app, DreamCorrection(category: "summary", text: text)) }
-        case let .tag(tag): await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: text))
-        }
+        await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: text))
     }
 
     // What the analysis presents follows the order of the wiki 4.6.7 table.
@@ -320,12 +392,37 @@ struct DreamDetailView: View {
 
     private func contextBlock(_ value: Analysis, dream: Dream) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(value.context) { entry in
-                switch (entry.available, entry.kind, entry.label) {
-                case (true, .memory, _): NavigationLink(value: Route.note(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
-                case (true, .dream, let label) where label != "DREAM": NavigationLink(value: Route.dream(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
-                default: contextRow(entry, link: false)
+            // The dream and its own summary and tags are always used, so the list shows only the notes and earlier dreams (Re-Design list, 6 November 2026).
+            ForEach(value.context.filter { $0.label != "DREAM" && $0.kind != .output }) { entry in
+                HStack {
+                    switch (entry.available, entry.kind, entry.label) {
+                    case (true, .memory, _): NavigationLink(value: Route.note(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
+                    case (true, .dream, let label) where label != "DREAM": NavigationLink(value: Route.dream(entry.sourceId)) { contextRow(entry, link: true) }.buttonStyle(.plain)
+                    default: contextRow(entry, link: false)
+                    }
+                    // Every note can be taken out, whether it was added or picked automatically; it leaves on the next Update Analysis (Re-Design list, 6 November 2026).
+                    if entry.kind == .memory && entry.choice == "removed" {
+                        Button("Undo") { choose(entry.sourceId, nil) }.buttonStyle(.quiet).disabled(analysis.isSending)
+                    } else if entry.kind == .memory {
+                        removeButton(entry.sourceId, name: entry.name)
+                    }
                 }
+            }
+            ForEach(value.pendingNotes ?? []) { pending in
+                HStack {
+                    NavigationLink(value: Route.note(pending.sourceId)) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) { Text(pending.name).font(.callout); Hint("Added · used after Update Analysis") }
+                            Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(Color.muted)
+                        }
+                    }.buttonStyle(.plain)
+                    removeButton(pending.sourceId, name: pending.name)
+                }
+            }
+            if let error = analysis.error { Hint(error) }
+            if app.me?.useHistory == true {
+                Button("+ Add life note") { pickingNote = true }
+                    .buttonStyle(.quiet).disabled(analysis.isSending || addedCount(value) >= 4).accessibilityIdentifier("addAnalysisNote")
             }
             if value.removedSources > 0 { Hint("\(value.removedSources) source(s) since deleted or excluded") }
             if value.dreamDate != dream.dreamDate || value.mood != dream.mood {
@@ -333,10 +430,21 @@ struct DreamDetailView: View {
             }
         }.padding(.top, 8)
     }
+    private func removeButton(_ memory: String, name: String) -> some View {
+        Button { choose(memory, "removed") } label: { Image(systemName: "minus.circle").foregroundStyle(Color.muted) }
+            .buttonStyle(.plain).disabled(analysis.isSending).accessibilityLabel("Remove \(name)")
+    }
+    private func choose(_ memory: String, _ choice: String?) { Task { await analysis.choose(app, memory: memory, choice: choice) } }
+    private func addedCount(_ value: Analysis) -> Int { value.context.count { $0.choice == "added" } + (value.pendingNotes?.count ?? 0) }
+    private var listedNotes: Set<String> {
+        guard let value = analysis.analysis else { return [] }
+        return Set(value.context.filter { $0.kind == .memory && $0.choice != "removed" }.map(\.sourceId) + (value.pendingNotes ?? []).map(\.sourceId))
+    }
     private func contextRow(_ entry: ContextEntry, link: Bool) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name).font(.callout)
+                if entry.choice == "removed" { Hint("Removed · leaves after Update Analysis") }
                 if !entry.available { Hint("Changed since this analysis") }
                 if let cut = entry.cutTo { Hint("First \(cut) characters") }
             }
