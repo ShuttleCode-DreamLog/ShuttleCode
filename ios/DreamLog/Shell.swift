@@ -70,6 +70,8 @@ private struct Page<Header: View>: ViewModifier {
 // SwiftUI has no tap-outside to put the keyboard away, and a SwiftUI tap on the page would also fire on the text input itself;
 // a UIKit tap that ignores touches inside text inputs, cancels nothing and runs beside every other gesture ends editing on
 // any other tap while buttons and rows under it still act.
+// It also waits for every other gesture to fail: a tap that a button takes leaves the keyboard alone, because putting it
+// away while that button presents a confirmation left the confirmation's buttons dead (Revert, 10 November 2026).
 private struct KeyboardDismissal: UIGestureRecognizerRepresentable {
     func makeUIGestureRecognizer(context: Context) -> UITapGestureRecognizer {
         let recognizer = UITapGestureRecognizer()
@@ -88,6 +90,7 @@ private struct KeyboardDismissal: UIGestureRecognizerRepresentable {
             return !sequence(first: view, next: \.superview).contains { $0 is UITextInput }
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf other: UIGestureRecognizer) -> Bool { true }
     }
 }
 
