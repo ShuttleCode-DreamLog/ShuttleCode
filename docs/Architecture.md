@@ -1,6 +1,6 @@
 # Collaborator entry point
 
-The app opens on Home and has a bottom bar with Journal, Pattern, Add dream (which opens the dream editor over the screen; on Life notes it reads Add life note and opens a new note; on Pattern it reads Add pattern and opens the dream editor), Life notes and Settings, following the team's user-test prototype `DreamLog_User_Test.html` at the repo root (the header and bar in `Shell.swift`; colors, fonts and the shared card, field and button styles in `Theme.swift`). The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. The backend's task worker calls Gemini for the summary and tags (`organize`), the analysis (`analyze`) and pattern discovery (`index_dream`, `match_patterns`, `refresh_findings`).
+The app opens on Home and has a bottom bar with Journal, Pattern, Add dream (which opens the dream editor over the screen; on Life notes it reads Add life note and opens a new note; on Pattern it reads Add pattern and opens the new-pattern sheet), Life notes and Settings, following the team's user-test prototype `DreamLog_User_Test.html` at the repo root (the header and bar in `Shell.swift`; colors, fonts and the shared card, field and button styles in `Theme.swift`). The interface is native SwiftUI; the API is plain authenticated JSON over HTTPS. The backend's task worker calls Gemini for the summary and tags (`organize`), the analysis (`analyze`) and pattern discovery (`index_dream`, `match_patterns`, `refresh_findings`).
 
 ```mermaid
 flowchart LR

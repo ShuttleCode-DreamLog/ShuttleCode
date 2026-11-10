@@ -95,9 +95,8 @@ extension View {
     func page(_ header: some View, aboveBar: Bool = true) -> some View { modifier(Page(header: header, aboveBar: aboveBar)) }
 }
 
-// The prototype's bottom bar: four screens and the + that opens the dream editor, or the note editor on Life notes.
-// Patterns' + reads Add pattern and still opens the dream editor.
-// Since 10 November 2026 Patterns' + opens the new-pattern sheet: a title and the supporting dreams.
+// The prototype's bottom bar: four screens and the + that opens the dream editor, the note editor on Life notes, or since
+// 10 November 2026 the new-pattern sheet on Patterns (a title and the supporting dreams).
 struct BottomBar: View {
     @Environment(AppModel.self) private var app
     var body: some View {
@@ -128,7 +127,7 @@ struct BottomBar: View {
         .overlay(alignment: .top) { Rectangle().fill(Color.line).frame(height: 1) }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { app.barHeight = $0 }
     }
-    // Life notes' + adds a note. Pattern's opens the dream editor too: patterns are found in dreams and cannot be made by hand.
+    // Life notes' + adds a note and Patterns' + makes a pattern by hand.
     // Settings and Home keep the core action rather than the last tab's, which the screen would not show.
     private var addLabel: String {
         guard !app.showingHome else { return "Add dream" }
