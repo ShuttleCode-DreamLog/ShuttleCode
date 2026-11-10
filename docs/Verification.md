@@ -217,3 +217,9 @@ Disabling parallel simulator clones ensures the network test uses the simulator 
 - Schema 8 links existing effective dream tags to the user library, preserving original categories and sharing labels between Journal, detail and filters. Rename, deselect and delete persist across subsequent reads; import markers prevent deleted tags being recreated by opening the picker. Original AI outputs are retained and no AI generation is requested.
 - Backend **209 passed**, including shared existing labels, ownership, rename/filter consistency and deletion without resurrection. Local HTTPS check confirms an existing dream's 3 selected tags are all in the library and match its Journal labels.
 - Picker now uses dark `.regularMaterial` for a blurred background. The full create/select/reopen/rename/delete UI test passed again on the iPhone 18 Pro simulator against the updated local server.
+
+### Main compatibility — 10 November 2026
+
+- Merged `origin/main` at `b41b5c2` into `feature/manual-tag-library`; retained the folding/reorderable detail sections and placed main's Conversation analysis entry inside Analysis.
+- Backend: **218 passed**. Debug simulator unit tests: **44 passed**; the optional HTTPS integration suite remained skipped. Release simulator build: **succeeded**.
+- Debug and Release endpoint settings remain local and course-server respectively. No remote deployment or live Release API verification performed.
