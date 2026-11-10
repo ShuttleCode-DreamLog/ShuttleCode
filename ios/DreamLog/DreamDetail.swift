@@ -1,7 +1,7 @@
 import SwiftUI
 import Observation
 
-nonisolated enum Route: Hashable { case dream(String), note(String), draft(String) }
+nonisolated enum Route: Hashable { case dream(String), note(String), draft(String), conversation(String, title: String) }
 
 extension View {
     func routeDestinations() -> some View {
@@ -10,6 +10,7 @@ extension View {
             case let .dream(id): DreamDetailView(id: id)
             case let .note(id): NoteEditorView(id: id)
             case let .draft(id): DreamEditorView(id: id)
+            case let .conversation(id, title): DiscussionView(dreamId: id, title: title)
             }
         }
     }
@@ -241,31 +242,8 @@ struct DreamDetailView: View {
 
     // Tags are pills; each opens its corrections, and a removed tag stays, struck through, until it is restored.
     @ViewBuilder private func tagsBlock(_ dream: Dream) -> some View {
-        if let organization = dream.organization {
-            let editable = organization.status == .current
-            Wrap(spacing: 6) {
-                ForEach(organization.tags.filter { !$0.removed }) { tag in
-                    Menu {
-                        Section("\(tag.category.rawValue.capitalized)\(tag.feeling == .inferred ? " · inferred" : "")\(tag.corrected ? " · your correction" : "") · “\(tag.excerpt)”") {
-                            Button("Show dreams with this tag", systemImage: "line.3.horizontal.decrease") { app.showJournal(tag: tag.text) }
-                            if editable {
-                                Button("Rename…", systemImage: "pencil") { correctionText = tag.text; renaming = tag }
-                                if tag.corrected { Button("Restore “\(tag.originalText)”", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
-                                Button("Remove", systemImage: "minus.circle", role: .destructive) {
-                                    Task { await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: "")) }
-                                }
-                            }
-                        }
-                    } label: { Pill(tag.text) }
-                }
-                ForEach(organization.tags.filter(\.removed)) { tag in
-                    Menu {
-                        if editable { Button("Restore", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
-                    } label: { Pill(tag.originalText, struck: true) }
-                    .accessibilityLabel("Removed tag \(tag.originalText)")
-                }
-            }
-            .disabled(model.isSending)
+        TagSelectionControl(selectedIDs: dream.customTags?.map(\.id) ?? [], initialTags: dream.customTags ?? []) { ids in
+            await model.saveTags(app, ids: ids)
         }
     }
 
@@ -306,7 +284,15 @@ struct DreamDetailView: View {
             Text(dream.text).font(.callout).textSelection(.enabled)
             if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
         case .summary: organizationBlock(dream)
-        case .analysis: analysisBlock(dream)
+        case .analysis:
+            analysisBlock(dream)
+            // The discussion entry stays with the analysis it continues (wiki 4.6.6).
+            if !dream.permissions.discussion { Hint("Discussion is off") }
+            else if !dream.text.isEmpty {
+                NavigationLink(value: Route.conversation(id, title: dream.title ?? "Dream")) {
+                    Label("Conversation analysis", systemImage: "bubble.left.and.bubble.right")
+                }.buttonStyle(.primary).padding(.top, 8)
+            }
         }
     }
 

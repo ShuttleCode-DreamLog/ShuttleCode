@@ -211,3 +211,24 @@ Disabling parallel simulator clones ensures the network test uses the simulator 
 - Context follows the spec's input layout: `DREAM`, `DESC`, then `LIFE NOTES (most recent first; may be empty)` as `- M1 · <date>: <text>` lines. Notes are every allowed note whose date window reaches the dream (30 days, or ongoing), newest first, at most 20, instead of the top 4 by shared terms; the model chooses which fit. Earlier dreams are no longer sent, and the term-matching helpers and their constants are gone.
 - The app titles the four kinds and renders section text as inline markdown (bold, preserved line breaks). Stored `analyze-1` outputs still decode; their kinds show as "Reflection" until Update Analysis.
 - Backend: **194 passed**. The iOS changes were not built (Linux host).
+
+## Manual tag library — 6 November 2026
+
+- `feature/manual-tag-library`: user-owned tag create/rename/delete, normalized duplicate reuse, persistent colors, per-dream selection, new-dream draft persistence and journal filtering. No new AI behavior or drag grouping.
+- Backend: **207 passed**, including tag ownership, atomic creation/attachment, rename/delete propagation and no AI tasks on selection changes. Existing database versions 1–6 upgrade to schema 7; phone drafts upgrade to local schema 2.
+- iPhone 18 Pro / iOS 27 simulator: FoundationTests **40 passed**, including tag request failures and draft reopening. DreamLogUI `TagLibraryTests` **1 passed** against local HTTPS: open full-screen mask, create/select, reopen, rename and delete; screenshot attached to the result bundle. The test creates no dream and requests no AI generation.
+- Runtime check found an old Granian parent/worker still listening alongside the new server. After normal termination did not stop them, the confirmed old processes were removed. The current local backend now serves the new tag routes. No remote deployment performed.
+
+### Existing tags and blurred picker
+
+- Schema 8 links existing effective dream tags to the user library, preserving original categories and sharing labels between Journal, detail and filters. Rename, deselect and delete persist across subsequent reads; import markers prevent deleted tags being recreated by opening the picker. Original AI outputs are retained and no AI generation is requested.
+- Backend **209 passed**, including shared existing labels, ownership, rename/filter consistency and deletion without resurrection. Local HTTPS check confirms an existing dream's 3 selected tags are all in the library and match its Journal labels.
+- Picker now uses dark `.regularMaterial` for a blurred background. The full create/select/reopen/rename/delete UI test passed again on the iPhone 18 Pro simulator against the updated local server.
+
+### Main compatibility — 10 November 2026
+
+- Merged `origin/main` at `b41b5c2` into `feature/manual-tag-library`; retained the folding/reorderable detail sections and placed main's Conversation analysis entry inside Analysis.
+- Backend: **218 passed**. Debug simulator unit tests: **44 passed**; the optional HTTPS integration suite remained skipped. Release simulator build: **succeeded**.
+- Debug and Release endpoint settings remain local and course-server respectively. No remote deployment or live Release API verification performed.
+
+- Release compatibility: tolerate an absent `organization.summary_corrected` field from the AI-only-summary backend. Release unit tests with command-line `ENABLE_TESTABILITY=YES`: **45 passed**, including absent/false/true summary flag cases. Live server version could not be confirmed because SSH host-key verification failed.

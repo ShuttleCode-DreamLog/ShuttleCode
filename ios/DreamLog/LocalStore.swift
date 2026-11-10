@@ -34,7 +34,7 @@ actor LocalStore {
         let hasVersion = sqlite3_step(version) == SQLITE_ROW
         let storedVersion = sqlite3_column_int(version, 0)
         sqlite3_finalize(version)
-        guard hasVersion && (storedVersion == 0 || storedVersion == 1) else {
+        guard hasVersion && (storedVersion == 0 || storedVersion == 1 || storedVersion == 2) else {
             sqlite3_close(database)
             database = nil
             return .failure(.openFailed)
@@ -48,7 +48,7 @@ actor LocalStore {
             audio_uploaded INTEGER NOT NULL DEFAULT 0,audio_send_started INTEGER NOT NULL DEFAULT 0,
             unconfirmed INTEGER NOT NULL DEFAULT 0,sent_text TEXT,updated_at INTEGER NOT NULL
         );
-        PRAGMA user_version=1;
+        PRAGMA user_version=2;
         """
         let status = sqlite3_exec(database, sql, nil, nil, nil)
         guard status == SQLITE_OK else {
@@ -56,18 +56,29 @@ actor LocalStore {
             database = nil
             return .failure(.statementFailed(code: status))
         }
+        var columns: OpaquePointer?
+        sqlite3_prepare_v2(database, "PRAGMA table_info(drafts)", -1, &columns, nil)
+        var hasTags = false
+        while sqlite3_step(columns) == SQLITE_ROW {
+            if let name = sqlite3_column_text(columns, 1), String(cString: name) == "tag_ids" { hasTags = true }
+        }
+        sqlite3_finalize(columns)
+        if !hasTags && sqlite3_exec(database, "ALTER TABLE drafts ADD COLUMN tag_ids TEXT", nil, nil, nil) != SQLITE_OK {
+            sqlite3_close(database); self.database = nil
+            return .failure(.openFailed)
+        }
         return .success(())
     }
     func saveDraft(_ draft: Draft) -> Result<Void, StoreError> {
         guard let database else { return .failure(.openFailed) }
         guard let permissions = try? JSONEncoder().encode(draft.permissions), let permissionText = String(data: permissions, encoding: .utf8) else { return .failure(.filesFailed) }
-        let columns = ["dream_id", "text", "title", "mood", "dream_date", "source", "permissions", "base_revision", "unsent", "conflict", "audio_file", "audio_ms", "audio_uploaded", "audio_send_started", "unconfirmed", "sent_text", "updated_at"]
+        let columns = ["dream_id", "text", "title", "mood", "dream_date", "source", "permissions", "base_revision", "unsent", "conflict", "audio_file", "audio_ms", "audio_uploaded", "audio_send_started", "unconfirmed", "sent_text", "updated_at", "tag_ids"]
         let sql = "INSERT INTO drafts(\(columns.joined(separator: ","))) VALUES(\(Array(repeating: "?", count: columns.count).joined(separator: ","))) ON CONFLICT(dream_id) DO UPDATE SET \(columns.dropFirst().map { "\($0)=excluded.\($0)" }.joined(separator: ","))"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return .failure(.statementFailed(code: sqlite3_errcode(database))) }
         defer { sqlite3_finalize(statement) }
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        let texts: [(Int32, String?)] = [(1,draft.dreamId),(2,draft.text),(3,draft.title),(4,draft.mood?.rawValue),(5,draft.dreamDate),(6,draft.source.rawValue),(7,permissionText),(11,draft.audioFile),(16,draft.sentText)]
+        let texts: [(Int32, String?)] = [(1,draft.dreamId),(2,draft.text),(3,draft.title),(4,draft.mood?.rawValue),(5,draft.dreamDate),(6,draft.source.rawValue),(7,permissionText),(11,draft.audioFile),(16,draft.sentText),(18,draft.tagIds.flatMap { try? JSONEncoder().encode($0) }.flatMap { String(data: $0, encoding: .utf8) })]
         for (column, value) in texts {
             if let value { sqlite3_bind_text(statement, column, value, -1, transient) }
             else { sqlite3_bind_null(statement, column) }
@@ -83,7 +94,7 @@ actor LocalStore {
     func drafts(_ id: String? = nil) -> Result<[Draft], StoreError> {
         guard let database else { return .failure(.openFailed) }
         var statement: OpaquePointer?
-        let sql = "SELECT dream_id,text,title,mood,dream_date,source,permissions,base_revision,unsent,conflict,audio_file,audio_ms,audio_uploaded,audio_send_started,unconfirmed,sent_text,updated_at FROM drafts" + (id == nil ? "" : " WHERE dream_id=?") + " ORDER BY updated_at DESC,dream_id"
+        let sql = "SELECT dream_id,text,title,mood,dream_date,source,permissions,base_revision,unsent,conflict,audio_file,audio_ms,audio_uploaded,audio_send_started,unconfirmed,sent_text,updated_at,tag_ids FROM drafts" + (id == nil ? "" : " WHERE dream_id=?") + " ORDER BY updated_at DESC,dream_id"
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return .failure(.statementFailed(code: sqlite3_errcode(database))) }
         defer { sqlite3_finalize(statement) }
         if let id { sqlite3_bind_text(statement, 1, id, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self)) }
@@ -104,6 +115,10 @@ actor LocalStore {
             draft.audioUploaded = sqlite3_column_int(statement, 12) != 0; draft.audioSendStarted = sqlite3_column_int(statement, 13) != 0
             draft.unconfirmed = sqlite3_column_int(statement, 14) != 0; draft.sentText = text(15)
             draft.updatedAt = Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 16)) / 1000)
+            if let tags = text(17) {
+                guard let ids = try? JSONDecoder().decode([String].self, from: Data(tags.utf8)) else { return .failure(.statementFailed(code: SQLITE_CORRUPT)) }
+                draft.tagIds = ids
+            }
             drafts.append(draft)
             status = sqlite3_step(statement)
         }

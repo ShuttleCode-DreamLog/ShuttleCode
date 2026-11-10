@@ -2,7 +2,7 @@ import os
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 MAX_NOTE_PHOTOS = 5
 MAX_PHOTO_BYTES = 5000000
 MAX_JSON_BYTES = 262144
@@ -22,6 +22,9 @@ MAX_CONTEXT_MEMORIES = 20
 # Notes the user adds by hand come on top of the automatic pick, with their own limit (Re-Design list, 6 November 2026).
 MAX_ADDED_MEMORIES = 4
 MEMORY_WINDOW_DAYS = 30
+MAX_THREAD_PAIRS = 10
+TURN_MARKER_SECONDS = 300
+CONTROL_HOLD_CHARS = 40
 EMBEDDING_DIMENSIONS = 768
 MAX_EMBED_CHARS = 6000
 MAX_CANDIDATE_DISTANCE = 0.40

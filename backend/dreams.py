@@ -13,6 +13,7 @@ import patterns
 import providers
 import records
 import tasks
+import tag_library
 from web import RequestError, check_id, json_response, read_body, resolve_user
 
 logger = logging.getLogger('dreamlog')
@@ -37,6 +38,7 @@ class DreamSave(msgspec.Struct, kw_only=True):
     mood: str | None | msgspec.UnsetType = msgspec.UNSET
     source: str | msgspec.UnsetType = msgspec.UNSET
     permissions: Permissions | None = None
+    tag_ids: list[str] | msgspec.UnsetType = msgspec.UNSET
 
 
 class PermissionsChange(msgspec.Struct):
@@ -94,7 +96,8 @@ async def organization_value(identity, dream_id):
 
 
 async def dream_body(row):
-    return dream_value(row, await tasks.dream_tasks(row['user_id'], row['id'], row['revision']), await organization_value(row['user_id'], row['id']))
+    await tag_library.import_existing(db.rwdb, row['user_id'])
+    return dream_value(row, await tasks.dream_tasks(row['user_id'], row['id'], row['revision']), await organization_value(row['user_id'], row['id'])) | {'custom_tags': await tag_library.dream_tags(db.rwdb, row['user_id'], row['id'])}
 
 
 async def summaries(identity, dreams):
@@ -104,11 +107,10 @@ async def summaries(identity, dreams):
 
 
 async def tag_lists(identity, dreams):
-    # The current organization's effective tags, in the order they were found; a removed tag is left out by the view.
     ids = [row['id'] for row in dreams]
-    found = await db.rwdb.execute_fetchall(f"SELECT dream_id,category,text FROM effective_tags WHERE user_id=? AND output_status='current' AND dream_id IN ({','.join('?' * len(ids))}) ORDER BY position", (identity, *ids)) if ids else []
+    rows = await db.rwdb.execute_fetchall(f"SELECT d.dream_id,d.category,t.text FROM visible_user_tags d JOIN user_tags t ON t.id=d.tag_id WHERE d.user_id=? AND d.dream_id IN ({','.join('?' * len(ids))}) GROUP BY d.dream_id,t.id ORDER BY min(d.position),t.id", (identity, *ids)) if ids else []
     lists = {}
-    for row in found:
+    for row in rows:
         lists.setdefault(row['dream_id'], []).append({'category': row['category'], 'text': row['text']})
     return lists
 
@@ -118,10 +120,12 @@ def journal_item(row, status, summary, tags, similarity=None):
 
 
 async def list_tags(request):
-    # The tags a user can filter by: every effective tag of a current organization, most frequent first.
     identity = await resolve_user(request)
-    rows = await db.rwdb.execute_fetchall("SELECT category,text,count(DISTINCT dream_id) AS count FROM effective_tags WHERE user_id=? AND output_status='current' GROUP BY category,text ORDER BY count DESC,text", (identity,))
-    return json_response({'tags': [{'category': row['category'], 'text': row['text'], 'count': row['count']} for row in rows]})
+    async with db.tx() as connection:
+        await tag_library.import_existing(connection, identity)
+        rows = await connection.execute_fetchall("SELECT d.category,t.text,count(DISTINCT d.dream_id) AS count FROM visible_user_tags d JOIN user_tags t ON t.id=d.tag_id WHERE d.user_id=? GROUP BY t.id ORDER BY count DESC,t.text", (identity,))
+    return json_response({'tags': [dict(row) for row in rows]})
+
 
 
 # Wording in the search box is embedded once and compared with the dreams' vectors (wiki 4.8.3); the distance is the cosine
@@ -149,7 +153,9 @@ async def owned_dream(identity, dream_id):
 async def get_dream(request):
     identity = await resolve_user(request)
     dream_id = check_id(request.path_params['dream_id'])
-    return json_response({'dream': await dream_body(await owned_dream(identity, dream_id))})
+    async with db.tx():
+        value = await dream_body(await owned_dream(identity, dream_id))
+    return json_response({'dream': value})
 
 
 async def save_dream(request):
@@ -195,10 +201,13 @@ async def save_dream(request):
             if stored is not None and (mood != stored['mood'] or body.dream_date != stored['dream_date']):
                 # The analysis was given the mood and the date; other dreams' analyses were given this date (wiki 4.5.4).
                 await connection.execute("UPDATE outputs SET status='outdated' WHERE dream_id=? AND type='analysis'", (dream_id,))
+                await connection.execute("UPDATE messages SET state='stale' WHERE dream_id=?", (dream_id,))
                 if body.dream_date != stored['dream_date']:
                     await records.source_changed(connection, 'dream', dream_id)
             if stored is None or text_changed:
                 await records.schedule_processing(connection, dream_id)
+        if body.tag_ids is not msgspec.UNSET:
+            await tag_library.set_dream_tags(connection, identity, dream_id, body.tag_ids)
         result = await owned_dream(identity, dream_id)
         # AI integration point: enqueue revision-keyed dream processing here in this transaction.
         # This is where the future worker will call the provider API after commit, with owner/permission checks.
@@ -295,6 +304,8 @@ def paging(request):
 
 
 async def page(request, identity, filters):
+    async with db.tx() as connection:
+        await tag_library.import_existing(connection, identity)
     limit, offset = paging(request)
     clauses, values = ['d.user_id=?'], [identity]
     if len(filters.query) > config.LIMITS['max_message_chars']:
@@ -319,8 +330,8 @@ async def page(request, identity, filters):
         raise RequestError(400, 'invalid_request', 'Start date must not be after end date.')
     # Every chosen tag narrows the dreams; a dream must carry all of them.
     for tag in [*filters.tags, *([filters.tag] if filters.tag is not None else [])]:
-        clauses.append("EXISTS(SELECT 1 FROM effective_tags t WHERE t.dream_id=d.id AND t.user_id=d.user_id AND t.text=? AND t.output_status='current')")
-        values.append(' '.join(tag.lower().split()))
+        clauses.append("EXISTS(SELECT 1 FROM visible_user_tags dt JOIN user_tags ut ON ut.id=dt.tag_id WHERE dt.dream_id=d.id AND dt.user_id=d.user_id AND ut.label_key=?)")
+        values.append(' '.join(tag.casefold().split()))
     order = f"SELECT d.* FROM dreams d WHERE {' AND '.join(clauses)} ORDER BY d.dream_date DESC,d.created_at DESC,d.id ASC"
     if ranked is None:
         rows = await db.rwdb.execute_fetchall(f'{order} LIMIT ? OFFSET ?', (*values, limit + 1, offset))
