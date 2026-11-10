@@ -481,3 +481,17 @@ async def test_organize_names_an_untitled_dream_and_keeps_a_user_title(client, c
     gemini.answers.append({'title': 'Another name', 'summary': SUMMARY, 'items': []})
     assert renamed['revision'] == 2 and await tasks.run_once()
     assert (await client.get(f'/v1/dreams/{untitled}', headers=headers)).json()['dream']['title'] == 'My own name'
+
+
+async def test_a_generated_title_follows_the_text_after_an_edit(client, clock, gemini):
+    headers, user, dream_id = await journal(client, title=None)
+    gemini.answers.append({'title': 'A quiet lake', 'summary': SUMMARY, 'items': []})
+    assert await tasks.run_once()
+    assert (await dream(client, headers, dream_id))['title'] == 'A quiet lake'
+    # The editor sends back the title it was shown, so the generated title arrives with the new text and is still the AI's.
+    edited = (await client.put(f'/v1/dreams/{dream_id}', headers=headers, json={'base_revision': 1, 'text': TEXT + ' Then the lake froze.', 'dream_date': '2026-10-08', 'title': 'A quiet lake', 'source': 'text'})).json()['dream']
+    gemini.answers.append({'title': 'A frozen lake', 'summary': SUMMARY, 'items': []})
+    while await tasks.run_once():
+        pass
+    assert edited['revision'] == 2 and [task['status'] for task in await organize_tasks(dream_id)] == ['completed', 'completed']
+    assert (await dream(client, headers, dream_id))['title'] == 'A frozen lake'

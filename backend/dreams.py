@@ -449,11 +449,14 @@ async def organize(task):
         if not await tasks.claimed(connection, task) or not organizable(await connection.execute_fetchall(*query), task):
             return tasks.Obsolete()
         if not await connection.execute_fetchall("SELECT 1 FROM outputs WHERE dream_id=? AND type='organization' AND dream_revision=?", (task['dream_id'], task['source_revision'])):
+            # The generated title names a dream the user left unnamed; a title of their own is never replaced (metadata, no new revision).
+            # A title equal to an earlier generated one is still the AI's, so it follows the text after an edit (10 November 2026);
+            # it is compared before save_output deletes the earlier organization.
+            if title:
+                await connection.execute('''UPDATE dreams SET title=?,updated_at=? WHERE id=? AND user_id=? AND (title IS NULL OR title IN
+                    (SELECT json_extract(content,'$.title') FROM outputs WHERE dream_id=? AND type='organization'))''', (title, config.now(), task['dream_id'], task['user_id'], task['dream_id']))
             output_id = await records.save_output(connection, task['user_id'], task['dream_id'], 'organization', task['source_revision'], {'summary': cut(summary, config.LIMITS['max_summary_chars']), **({'title': title} if title else {})}, model, ORGANIZE_VERSION)
             await connection.executemany('INSERT INTO tags(id,output_id,dream_id,user_id,category,text,excerpt,feeling) VALUES(?,?,?,?,?,?,?,?)', [(str(uuid4()), output_id, task['dream_id'], task['user_id'], *tag) for tag in kept])
-            # The generated title names a dream the user left unnamed; a title of their own is never replaced (metadata, no new revision).
-            if title:
-                await connection.execute('UPDATE dreams SET title=?,updated_at=? WHERE id=? AND user_id=? AND title IS NULL', (title, config.now(), task['dream_id'], task['user_id']))
         await tasks.complete(connection, task)
         await records.schedule_processing(connection, task['dream_id'])
     return tasks.Done()
