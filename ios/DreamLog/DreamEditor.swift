@@ -15,8 +15,8 @@ struct DreamEditorView: View {
     let presented: Bool
 
     // `presented` is the editor opened over a dream's screen: it starts editing and always offers Done.
-    init(id: String, newEntry: Bool = false, presented: Bool = false) {
-        _model = State(initialValue: DreamModel(id: id, newEntry: newEntry, editing: presented))
+    init(id: String, newEntry: Bool = false, presented: Bool = false, appending: String? = nil) {
+        _model = State(initialValue: DreamModel(id: id, newEntry: newEntry, editing: presented, appending: appending))
         self.newEntry = newEntry
         self.presented = presented
     }
