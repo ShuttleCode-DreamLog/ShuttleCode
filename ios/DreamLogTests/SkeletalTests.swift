@@ -105,18 +105,19 @@ extension FoundationTests {
         enqueue([(500, failure), (500, failure)])
         let journal = JournalModel()
         await journal.load(app)
-        #expect(BackendProtocol.state.withLock { $0.requests.map(\.httpMethod) } == ["PUT", "GET"])
+        #expect(BackendProtocol.state.withLock { $0.requests.map(\.httpMethod) } == ["GET", "PUT"])
         #expect(journal.rows.count == 2 && journal.rows.allSatisfy { $0.status == .unsentDraft })
 
         BackendProtocol.state.withLock { $0.requests = [] }
         let items = [first, second].map { "{\"id\":\"\($0.dreamId)\",\"dream_date\":\"\($0.dreamDate)\",\"title\":null,\"mood\":null,\"revision\":1,\"audio_status\":\"none\",\"preview\":\"\($0.text)\",\"summary\":null,\"status\":\"processing\",\"favorite_visual_id\":null,\"updated_at\":1}" }
-        enqueue([(404, Data("{\"error\":\"not_found\",\"message\":\"Not found\"}".utf8)), (201, try dreamResponse(journalDream(id: first.dreamId, text: first.text))),
+        enqueue([(200, Data("{\"items\":[],\"has_more\":false}".utf8)), (404, Data("{\"error\":\"not_found\",\"message\":\"Not found\"}".utf8)),
+                 (201, try dreamResponse(journalDream(id: first.dreamId, text: first.text))),
                  (201, try dreamResponse(journalDream(id: second.dreamId, text: second.text))), (200, Data("{\"items\":[\(items.joined(separator: ","))],\"has_more\":false}".utf8))])
         await journal.load(app)
         let requests = BackendProtocol.state.withLock { $0.requests }
-        // The uncertain first save is read before it is sent again (wiki 4.5.8, "An unconfirmed draft").
-        #expect(requests.map(\.httpMethod) == ["GET", "PUT", "PUT", "GET"])
-        #expect(requests[1].url?.lastPathComponent == first.dreamId && requests[2].url?.lastPathComponent == second.dreamId)
+        // The list is read first. The uncertain first save is then read before it is sent again (wiki 4.5.8, "An unconfirmed draft").
+        #expect(requests.map(\.httpMethod) == ["GET", "GET", "PUT", "PUT", "GET"])
+        #expect(requests[2].url?.lastPathComponent == first.dreamId && requests[3].url?.lastPathComponent == second.dreamId)
         #expect(try await app.store.drafts().get().isEmpty)
         #expect(journal.rows.map(\.status) == [.processing, .processing] && journal.error == nil)
         await closeJournalApp(app)
