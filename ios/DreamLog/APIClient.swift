@@ -274,8 +274,17 @@ final class APIClient {
     func labelPattern(_ groupID: String, _ value: PatternLabel) async -> Result<PatternsResponse, APIError> {
         await send("PUT", "v1/patterns/groups/\(groupID)/label", value)
     }
-    func dismissPattern(_ groupID: String, _ value: PatternDismissal) async -> Result<PatternsResponse, APIError> {
+    func removePatternDream(_ groupID: String, _ value: PatternDream) async -> Result<PatternsResponse, APIError> {
         await send("POST", "v1/patterns/groups/\(groupID)/dismiss", value)
+    }
+    func addPatternDream(_ groupID: String, _ value: PatternDream) async -> Result<PatternsResponse, APIError> {
+        await send("POST", "v1/patterns/groups/\(groupID)/dreams", value)
+    }
+    func createPattern(_ value: PatternCreation) async -> Result<PatternsResponse, APIError> {
+        await send("POST", "v1/patterns/groups", value)
+    }
+    func deletePattern(_ groupID: String) async -> Result<PatternsResponse, APIError> {
+        decode(await response(method: "DELETE", path: "v1/patterns/groups/\(groupID)"))
     }
     func splitPattern(_ groupID: String, _ value: PatternSplit) async -> Result<PatternsResponse, APIError> {
         await send("POST", "v1/patterns/groups/\(groupID)/split", value)

@@ -82,6 +82,16 @@ class DismissBody(msgspec.Struct):
     note: str = ''
 
 
+class AddBody(msgspec.Struct):
+    dream_id: str
+
+
+class CreateBody(msgspec.Struct):
+    label: str
+    dream_ids: list[str]
+    description: str | None = None
+
+
 class SplitBody(msgspec.Struct):
     dream_ids: list[str]
     label: str | None = None
@@ -487,7 +497,7 @@ async def patterns_value(connection, identity, period):
         current = group['evidence_key'] == state['key']
         findings.append({'group_id': group['id'], 'label': group['user_label'] or group['label'], 'label_corrected': group['user_label'] is not None,
                          'kind': 'recurring' if state['supporting'] >= config.RECURRING_MIN_DREAMS else 'related', 'status': 'current' if current else 'refreshing',
-                         'explanation': group['explanation'] if current else None, 'supporting_dreams': state['supporting'], 'period_count': count, 'previous_count': before, 'trend': trend,
+                         'explanation': group['explanation'] if current else None, 'user_description': group['user_description'], 'supporting_dreams': state['supporting'], 'period_count': count, 'previous_count': before, 'trend': trend,
                          'examples': [{'dream_id': member['dream_id'], 'dream_date': member['dream_date'], 'title': titles.get(member['dream_id']), 'category': member['category'], 'description': member['description'],
                                        'excerpt': member['excerpt'], 'shared_element': member['shared_element'], 'difference': member['difference']} for member in sorted(state['members'], key=lambda member: member['dream_date'], reverse=True)[:config.MAX_EXAMPLES]],
                          'notes': list(dict.fromkeys(row['note'] for row in notes)), 'dismissal_notes': [{'dream_id': row['dream_id'], 'note': row['note']} for row in notes if row['kind'] == 'dismissed'],
@@ -596,6 +606,82 @@ async def split_group(request):
         await separate(connection, identity, [(a, b) for a in listed for b in remaining])
         await clear_group_texts(connection, group['id'])
         await clear_group_texts(connection, new_id)
+        await schedule_refresh(connection, identity)
+    return await respond(request, identity)
+
+
+async def delete_group(request):
+    identity = await resolve_user(request)
+    async with db.tx() as connection:
+        group = await owned_group(connection, identity, request.path_params['group_id'])
+        # The member tags become ungrouped occurrences again; only new evidence from a later dream can group them anew.
+        await connection.execute('DELETE FROM pattern_groups WHERE id=?', (group['id'],))
+    return await respond(request, identity)
+
+
+async def free_tags(connection, dream_id):
+    rows = await connection.execute_fetchall('SELECT tag_id,description FROM current_occurrences WHERE dream_id=? AND tag_id NOT IN (SELECT tag_id FROM pattern_memberships) ORDER BY tag_id', (dream_id,))
+    if not rows:
+        raise RequestError(409, 'invalid_state', 'This dream has no tags free to join a pattern yet.')
+    return rows
+
+
+async def join(connection, identity, group, picks, members):
+    # The user put these dreams together, which overrides any earlier separation between them and the members.
+    joined = sorted(members | {dream_id for dream_id, _ in picks})
+    await connection.execute('DELETE FROM pattern_separations WHERE user_id=? AND dream_id IN (SELECT value FROM json_each(?)) AND other_dream_id IN (SELECT value FROM json_each(?))',
+                             (identity, json.dumps(joined), json.dumps(joined)))
+    await connection.executemany('INSERT INTO pattern_memberships(tag_id,group_id,user_id,dream_id,model,instruction_version,created_at) VALUES(?,?,?,?,?,?,?)',
+                                 [(tag_id, group['id'], identity, dream_id, group['model'], group['instruction_version'], config.now()) for dream_id, tag_id in picks])
+
+
+async def create_group(request):
+    identity = await resolve_user(request)
+    body = await read_body(request, CreateBody)
+    label, description, listed = body.label.strip(), (body.description or '').strip() or None, list(dict.fromkeys(check_id(dream_id) for dream_id in body.dream_ids))
+    if not label or len(label) > config.LIMITS['max_label_chars']:
+        raise RequestError(400 if not label else 413, 'invalid_request' if not label else 'too_large', 'Give the pattern a name of 1 to 60 characters.')
+    if description and len(description) > config.LIMITS['max_pattern_note_chars']:
+        raise RequestError(413, 'too_large', 'Description is too long.')
+    if len(listed) < config.RELATED_MIN_DREAMS:
+        raise RequestError(400, 'invalid_request', 'A pattern needs at least two dreams.')
+    async with db.tx() as connection:
+        owned = {row['id'] for row in await connection.execute_fetchall(f"SELECT id FROM dreams WHERE user_id=? AND id IN ({','.join('?' * len(listed))})", (identity, *listed))}
+        if len(owned) != len(listed):
+            raise RequestError(404, 'not_found', 'Journal entry not found.')
+        free = {dream_id: await free_tags(connection, dream_id) for dream_id in listed}
+        # Each dream joins through the tag whose text the most of the chosen dreams share, so the AI's later naming sees the common element.
+        spread = {}
+        for rows in free.values():
+            for text in {row['description'] for row in rows}:
+                spread[text] = spread.get(text, 0) + 1
+        picks = [(dream_id, max(rows, key=lambda row: (spread[row['description']], -rows.index(row)))['tag_id']) for dream_id, rows in free.items()]
+        now, group = config.now(), {'id': str(uuid4()), 'model': 'user', 'instruction_version': 'user-created'}
+        await connection.execute('INSERT INTO pattern_groups(id,user_id,user_label,user_description,model,instruction_version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)',
+                                 (group['id'], identity, label, description, group['model'], group['instruction_version'], now, now))
+        await join(connection, identity, group, picks, set())
+        await schedule_refresh(connection, identity)
+    return await respond(request, identity)
+
+
+async def add_dream(request):
+    identity = await resolve_user(request)
+    dream_id = check_id((await read_body(request, AddBody)).dream_id)
+    async with db.tx() as connection:
+        group = await owned_group(connection, identity, request.path_params['group_id'])
+        if not await connection.execute_fetchall('SELECT 1 FROM dreams WHERE id=? AND user_id=?', (dream_id, identity)):
+            raise RequestError(404, 'not_found', 'Journal entry not found.')
+        members = await supporting(connection, group['id'])
+        if dream_id in members:
+            raise RequestError(409, 'invalid_state', 'This dream already supports the pattern.')
+        # The dream joins through one of its own ungrouped tags, preferably one the group's members already share.
+        shared = {row['description'] for row in await connection.execute_fetchall('SELECT c.description FROM pattern_memberships m JOIN current_occurrences c ON c.tag_id=m.tag_id WHERE m.group_id=?', (group['id'],))}
+        free = await free_tags(connection, dream_id)
+        tag = next((row for row in free if row['description'] in shared), free[0])
+        # Adding is the user's own correction, so it lifts earlier dismissals and separations between this dream and the members.
+        await connection.execute('DELETE FROM pattern_corrections WHERE group_id=? AND dream_id=?', (group['id'], dream_id))
+        await join(connection, identity, group, [(dream_id, tag['tag_id'])], members)
+        await clear_group_texts(connection, group['id'])
         await schedule_refresh(connection, identity)
     return await respond(request, identity)
 

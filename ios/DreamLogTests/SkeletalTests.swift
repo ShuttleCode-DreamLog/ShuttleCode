@@ -189,11 +189,11 @@ extension FoundationTests {
         let finding = try #require(patterns.response?.findings.first)
         BackendProtocol.state.withLock { $0.requests = [] }
         enqueue([(409, Data("{\"error\":\"invalid_state\",\"message\":\"Already split.\"}".utf8)), (200, patternsJSON)])
-        await patterns.split(app, finding, dreamIds: ["d1"], label: "", note: "")
+        await patterns.split(app, finding, dreamIds: ["d1"], label: "")
         let requests = BackendProtocol.state.withLock { $0.requests }
         #expect(requests.map(\.httpMethod) == ["POST", "GET"])
         let split = try #require(sentBody(requests[0]))
-        #expect(split["dream_ids"] as? [String] == ["d1"] && split["note"] as? String == "" && split["label"] == nil)
+        #expect(split["dream_ids"] as? [String] == ["d1"] && split["note"] == nil && split["label"] == nil)
         #expect(patterns.error == "Already split." && patterns.response != nil)
 
         enqueue([(200, patternsJSON)])

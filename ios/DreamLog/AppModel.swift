@@ -26,6 +26,8 @@ final class AppModel {
     var newDream: EntryRoute?
     // The bar's + on Life notes and the page's Add note present a new note editor.
     var newNote: EntryRoute?
+    // The bar's + on Pattern presents the new-pattern sheet.
+    var newPattern = false
     // The drawn bar's height: its safe-area inset does not reach the pages inside a NavigationStack, so they add it as a margin.
     var barHeight: CGFloat = 0
     // Raised when the app returns to the foreground, the connection returns or the editor over the tabs closes; open screens run load() on it (wiki 4.4.6).

@@ -71,7 +71,7 @@ async def open_database(path):
             await rwdb.execute(f"PRAGMA {setting}")
         version = (await rwdb.execute_fetchall("PRAGMA user_version"))[0][0]
         exists = await rwdb.execute_fetchall("SELECT 1 FROM sqlite_master WHERE name='users'")
-        if (version or exists) and version not in (1, 2, 3, 4, 5, 6, 7, config.SCHEMA_VERSION):
+        if (version or exists) and version not in (1, 2, 3, 4, 5, 6, 7, 8, config.SCHEMA_VERSION):
             raise RuntimeError(f"Schema version {version}; expected {config.SCHEMA_VERSION}")
         # Additive upgrades preserve journals, profiles and notes from earlier versions.
         schema = Path(__file__).with_name("schema.sql").read_text()
@@ -79,6 +79,9 @@ async def open_database(path):
         # Version 6 adds the note title; CREATE TABLE IF NOT EXISTS leaves a table from an earlier version without it.
         if "title" not in {row["name"] for row in await rwdb.execute_fetchall("PRAGMA table_info(memories)")}:
             await rwdb.execute("ALTER TABLE memories ADD COLUMN title TEXT")
+        # Version 9 adds the description a user writes for a pattern they make by hand; the refresh never rewrites it.
+        if "user_description" not in {row["name"] for row in await rwdb.execute_fetchall("PRAGMA table_info(pattern_groups)")}:
+            await rwdb.execute("ALTER TABLE pattern_groups ADD COLUMN user_description TEXT")
         await load_vectors()
         return rwdb
     except BaseException:

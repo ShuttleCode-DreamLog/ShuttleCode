@@ -15,7 +15,7 @@ This page is the agreement between the backend and the iOS app for the Skeletal 
 | Include life notes in a dream's analysis | `memory` entries in `analysis.context` | Implemented: "Information used for this analysis" lists and opens the notes; the history switch is also on Life Notes |
 | Exclude a dream or note from AI use | Dream: `PUT /v1/dreams/{id}/permissions`. Note: `allow_analysis` in `PUT /v1/memories/{id}` | Implemented: "Keep out of AI processing" and the six switches on Dream Detail; "Allow AI use" on notes |
 | Recurring patterns with counts and evidence | `GET /v1/patterns` | Implemented: Patterns tab, List and Garden views |
-| Rename, dismiss, split a pattern | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Implemented: "Correct this pattern" on each finding |
+| Rename, dismiss, split a pattern | `PUT /v1/patterns/groups/{id}/label`, `DELETE /v1/patterns/groups/{id}`, `POST …/split`; supporting dreams with `POST …/dismiss` and `POST …/dreams` | Implemented: Rename, Split and Dismiss buttons on the pattern page, Edit beside Supporting dreams (10 November 2026) |
 | Ask a follow-up question for a dream | `GET /v1/dreams/{id}/conversation`, `POST …/conversation/messages` (streamed), `POST …/conversation/restart` ([API.md](API.md#discussion)) | Implemented: "Conversation analysis" on Dream Detail, Start afresh |
 | Save a fact from the discussion | The reply's `offer`, then the ordinary `PUT /v1/memories/{id}` | Implemented: "Remember in profile" (and "Add to dream") on every message the user wrote, with the offer hint |
 
@@ -152,6 +152,9 @@ All four routes return the patterns response and accept optional `from_date` and
 | `GET /v1/patterns` | none | Calculated from stored rows |
 | `PUT /v1/patterns/groups/{group_id}/label` | `label` (string or null; null or empty removes the user's label) | No AI call |
 | `POST /v1/patterns/groups/{group_id}/dismiss` | `dream_id`, optional `note` | Repeating it changes only the note; an empty note removes it |
+| `POST /v1/patterns/groups` | `label`, optional `description`, `dream_ids` (two or more) | Makes a pattern by hand; returned with `user_description` |
+| `DELETE /v1/patterns/groups/{group_id}` | none | Deletes the pattern; the dreams stay |
+| `POST /v1/patterns/groups/{group_id}/dreams` | `dream_id` | Adds the dream; 409 if it already belongs or has no free tag |
 | `POST /v1/patterns/groups/{group_id}/split` | `dream_ids` (non-empty), optional `label`, optional `note` | A repeat answers 409; the app then calls `load()` |
 
 ```json
@@ -187,5 +190,5 @@ Swift types (wiki 4.8.10): `PatternsResponse`, `Period`, `Finding`, `FindingExam
 
 - Pattern discovery was designed as a stretch goal (wiki Arc C) and is now Skeletal. The app follows the team's user-test prototype (`DreamLog_User_Test.html`, 21 October 2026): Journal, Pattern, Add dream, Life notes and Settings tabs; the EGMUIUX exhibit (S01–S10) remains the source for what each screen must contain.
 - Tag corrections have no story map card; the app offers them on Dream Detail (15 October 2026). Summary corrections were dropped on 6 November 2026.
-- EGMUIUX draws Hide Pattern with a Dismissed view and Restore. The backend's dismissal (wiki 4.8.7) removes one dream from a group for good and has no restore, so the app offers "Not part of this pattern" per dream, shows dismissal notes with Remove note, and has no Dismissed view. Its Garden has no one-dream seedlings, because the server returns only groups of two or more dreams.
+- EGMUIUX draws Hide Pattern with a Dismissed view and Restore. The backend's dismissal (wiki 4.8.7) removes one dream from a group for good and has no restore, so the app's Dismiss deletes the whole pattern (`DELETE /v1/patterns/groups/{id}`, 10 November 2026) and the supporting-dreams editor removes single dreams; no notes are asked for or shown, and there is no Dismissed view. Its Garden has no one-dream seedlings, because the server returns only groups of two or more dreams.
 - The automatic resend of queued dreams follows story map card R2 over the wiki's rule that a draft leaves the phone only on the user's tap (4.4.4, rule 2).

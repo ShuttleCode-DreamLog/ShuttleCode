@@ -236,6 +236,7 @@ CREATE TABLE IF NOT EXISTS pattern_groups (
     label TEXT,
     user_label TEXT,
     description TEXT,
+    user_description TEXT,
     explanation TEXT,
     evidence_key TEXT,
     tried_key TEXT,

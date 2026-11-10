@@ -770,3 +770,63 @@ async def test_a_lost_member_keeps_the_name_and_quoted_evidence_still_counts(cli
     await run_all()
     named = (await found(client, headers))['findings'][0]
     assert (named['label'], named['status']) == ('quoted lakes', 'current') and all(example['shared_element'] == 'shared situation' for example in named['examples'])
+
+
+async def test_deleting_a_pattern_removes_it_and_keeps_the_dreams(client, clock, ai):
+    headers, user = person()
+    a, b, c = [await dream(client, headers, user, 'teacher') for _ in range(3)]
+    group_id = (await found(client, headers))['findings'][0]['group_id']
+    await client.post(f'/v1/patterns/groups/{group_id}/split', headers=headers, json={'dream_ids': [c]})
+    assert (await client.delete(f'/v1/patterns/groups/{group_id}', headers=credential())).status_code == 404
+    response = await client.delete(f'/v1/patterns/groups/{group_id}', headers=headers)
+    assert response.status_code == 200 and group_id not in [finding['group_id'] for finding in response.json()['findings']]
+    assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_memberships WHERE group_id=? UNION ALL SELECT 1 FROM pattern_corrections WHERE group_id=?', (group_id, group_id))
+    assert len(await db.rwdb.execute_fetchall('SELECT 1 FROM dreams WHERE id IN (?,?,?)', (a, b, c))) == 3
+    assert (await client.delete(f'/v1/patterns/groups/{group_id}', headers=headers)).status_code == 404
+
+
+async def test_adding_a_dream_lifts_its_dismissal_and_needs_a_free_tag(client, clock, ai):
+    headers, user = person()
+    a, b, c = [await dream(client, headers, user, 'teacher') for _ in range(3)]
+    group_id = (await found(client, headers))['findings'][0]['group_id']
+    url = f'/v1/patterns/groups/{group_id}/dreams'
+    await client.post(f'/v1/patterns/groups/{group_id}/dismiss', headers=headers, json={'dream_id': a})
+    assert await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_separations WHERE ? IN (dream_id,other_dream_id)', (a,))
+    await run_all()
+    added = await client.post(url, headers=headers, json={'dream_id': a})
+    finding = next(f for f in added.json()['findings'] if f['group_id'] == group_id)
+    assert added.status_code == 200 and finding['supporting_dreams'] == 3 and finding['status'] == 'refreshing'
+    assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_separations WHERE ? IN (dream_id,other_dream_id) UNION ALL SELECT 1 FROM pattern_corrections WHERE dream_id=?', (a, a))
+    assert len(await tasks_of('refresh_findings', user=user)) >= 1
+    assert (await client.post(url, headers=headers, json={'dream_id': b})).status_code == 409
+    other = await journal(client, headers, 'No tags yet.')
+    assert (await client.post(url, headers=headers, json={'dream_id': other})).status_code == 409
+    assert (await client.post(url, headers=headers, json={'dream_id': str(uuid4())})).status_code == 404
+    assert (await client.post(url, headers=credential(), json={'dream_id': a})).status_code == 404
+
+
+async def test_a_pattern_made_by_hand_keeps_its_name_and_description(client, clock, ai):
+    headers, user = person()
+    a = await dream(client, headers, user, 'teacher')
+    b = await dream(client, headers, user, 'teacher', extra=(('object', 'the bell', 'bell'),))
+    c = await dream(client, headers, user, 'zebra')
+    split_from = (await found(client, headers))['findings'][0]['group_id']
+    await client.post(f'/v1/patterns/groups/{split_from}/split', headers=headers, json={'dream_ids': [b]})
+    await run_all()
+    url = '/v1/patterns/groups'
+    for body, status in (({'label': ' ', 'dream_ids': [a, c]}, 400), ({'label': 'x' * 61, 'dream_ids': [a, c]}, 413), ({'label': 'Mine', 'dream_ids': [a, a]}, 400),
+                         ({'label': 'Mine', 'dream_ids': [a, str(uuid4())]}, 404), ({'label': 'Mine', 'description': 'x' * 301, 'dream_ids': [b, c]}, 413)):
+        assert (await client.post(url, headers=headers, json=body)).status_code == status
+    assert (await client.post(url, headers=credential(), json={'label': 'Mine', 'dream_ids': [b, c]})).status_code == 404
+    groups = await db.rwdb.execute_fetchall('SELECT count(*) FROM pattern_groups WHERE user_id=?', (user,))
+    made = await client.post(url, headers=headers, json={'label': 'School and animals', 'description': 'Both feel like tests.', 'dream_ids': [b, c]})
+    assert made.status_code == 200
+    finding = next(f for f in made.json()['findings'] if f['label'] == 'School and animals')
+    assert (finding['user_description'], finding['label_corrected'], finding['supporting_dreams'], finding['status']) == ('Both feel like tests.', True, 2, 'refreshing')
+    assert (await db.rwdb.execute_fetchall('SELECT count(*) FROM pattern_groups WHERE user_id=?', (user,)))[0][0] == groups[0][0] + 1
+    assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_separations WHERE dream_id IN (?,?) AND other_dream_id IN (?,?)', (b, c, b, c))
+    await run_all()
+    after = next(f for f in (await found(client, headers))['findings'] if f['group_id'] == finding['group_id'])
+    assert (after['label'], after['user_description'], after['status']) == ('School and animals', 'Both feel like tests.', 'current') and after['explanation']
+    taken = await client.post(url, headers=headers, json={'label': 'Again', 'dream_ids': [b, c]})
+    assert taken.status_code == 409
