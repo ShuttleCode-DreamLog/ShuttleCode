@@ -114,6 +114,10 @@ struct DreamEditorView: View {
                 ForEach(Mood.allCases.filter { $0 != .unknown }, id: \.self) { mood in Text(mood.rawValue.capitalized).tag(Optional(mood)) }
             }.labelsHidden()
         }
+        TagSelectionControl(selectedIDs: draft.tagIds ?? [], initialTags: model.dream?.customTags ?? []) { ids in
+            model.change(app) { $0.tagIds = ids }
+            return true
+        }
         if draft.unconfirmed { Hint("Not confirmed by the server yet") }
         if draft.conflict {
             VStack(alignment: .leading, spacing: 10) {

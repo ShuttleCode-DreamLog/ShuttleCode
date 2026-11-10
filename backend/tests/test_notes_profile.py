@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import config
 import db
 import providers
 from test_foundation import client, credential
@@ -88,13 +89,19 @@ async def test_new_routes_require_bearer(client):
         assert (await client.request(method,path,json=note())).status_code == 401
 
 
-@pytest.mark.parametrize('version', [1, 2, 3, 4, 5])
+@pytest.mark.parametrize('version', [1, 2, 3, 4, 5, 6, 7])
 async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     path = tmp_path / 'v1.db'
     connection = sqlite3.connect(path)
     schema = Path(db.__file__).with_name('schema.sql').read_text()
     connection.executescript(schema)
-    connection.execute('ALTER TABLE memories DROP COLUMN title')
+    connection.execute('DROP VIEW visible_user_tags')
+    connection.execute('DROP TABLE imported_tag_links')
+    if version < 7:
+        connection.execute('DROP TABLE dream_user_tags')
+        connection.execute('DROP TABLE user_tags')
+    if version < 6:
+        connection.execute('ALTER TABLE memories DROP COLUMN title')
     if version <= 4:
         connection.execute('DROP TABLE dream_vectors')
     if version <= 3:
@@ -115,7 +122,7 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     connection.close()
     upgraded = await db.open_database(path)
     try:
-        assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == 6
+        assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == config.SCHEMA_VERSION
         assert (await upgraded.execute_fetchall('SELECT text FROM dreams WHERE id=?',(dream_id,)))[0][0] == 'Kept sample'
         assert [tuple(row) for row in await upgraded.execute_fetchall('SELECT title,text FROM memories')] == [(None, 'Kept note')]
         assert not await upgraded.execute_fetchall('SELECT * FROM profiles')

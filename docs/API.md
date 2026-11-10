@@ -235,3 +235,15 @@ curl --cacert backend/.local/server.crt \
 ```
 
 Use the returned revision on edit. Use the same credential and ID for GET/DELETE. A separate test UUID has separate settings, profile, journals and notes. The runnable smoke test `backend/tests/smoke_https.py` exercises these operations with invented data and deletes its temporary user afterwards.
+
+## Manual tag library
+
+`GET /v1/tag-library` returns `{"tags":[{"id","text","color"}]}` for the current journal. `POST /v1/tag-library` with `{"text":"Home"}` creates a tag (201) or reuses an existing case-insensitive, whitespace-normalized name (200), returning `{"tag":{…}}`. Names contain 1–60 characters. The stable color is one of `sage`, `blue`, `rose`, `amber`, `violet`, `teal`.
+
+`PUT /v1/tag-library/{id}` with `{"text":"New name"}` renames the tag everywhere it is attached and returns the library; a duplicate name returns 409. `DELETE /v1/tag-library/{id}` returns 204 and removes its associations from dreams, without touching dream text or AI-generated tags.
+
+Dream responses include `custom_tags`. `PUT /v1/dreams/{id}/tags` with `{"tag_ids":["<UUID>"]}` replaces the dream's manual selection and returns the dream. The normal dream save also accepts optional `tag_ids`, allowing new entries to save their text and tags atomically. Omitting this field preserves the selection; an empty list clears it. Up to 50 owned tags may be attached; unavailable/foreign IDs return 404 without partial changes. Manual tags appear in journal rows and tag filters independently of AI output. None of these operations schedules AI generation.
+
+Schema 8 includes `user_tags`, `dream_user_tags` and `imported_tag_links` with cascading journal/dream deletion. The phone's local draft schema 2 adds nullable `tag_ids`, preserving version 1 drafts. Drag grouping, default libraries and AI selection/recommendation are outside this increment.
+
+Existing current dream tags are imported into the library by normalized name and shown as selected on their source dreams. Journal rows, detail selection and filters share `visible_user_tags`. Import links preserve original categories and stop deleted or deselected tags reappearing on reload; obsolete AI output stops contributing its automatic associations. Renaming a library tag updates its displayed name on every linked dream without changing original AI output or triggering generation. The picker uses a dark system blur material.
