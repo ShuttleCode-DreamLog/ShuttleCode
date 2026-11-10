@@ -48,8 +48,8 @@ final class PatternsModel {
     func removeDream(_ app: AppModel, _ finding: Finding, dreamId: String) async -> Bool {
         await change(app) { await $0.removePatternDream(finding.groupId, PatternDream(dreamId: dreamId)) }
     }
-    func create(_ app: AppModel, label: String, description: String, dreamIds: [String]) async -> Bool {
-        await change(app) { await $0.createPattern(PatternCreation(label: label, description: description.isEmpty ? nil : description, dreamIds: dreamIds)) }
+    func create(_ app: AppModel, label: String, dreamIds: [String]) async -> Bool {
+        await change(app) { await $0.createPattern(PatternCreation(label: label, dreamIds: dreamIds)) }
     }
     func addDream(_ app: AppModel, _ finding: Finding, dreamId: String) async {
         await change(app) { await $0.addPatternDream(finding.groupId, PatternDream(dreamId: dreamId)) }
@@ -94,7 +94,6 @@ struct PatternsView: View {
                     }.pickerStyle(.segmented)
                     if let error = model.error { ErrorCard(error) { Task { await model.load(app) } } }
                     if let response = model.response {
-                        Hint("\(displayDate(response.period.fromDate)) – \(displayDate(response.period.toDate)) · \(response.eligibleDreams) eligible recorded dreams")
                         if !response.available {
                             Text("New matching is not available on the server at the moment. Patterns found earlier are still shown.").font(.callout).card()
                         }
@@ -207,7 +206,6 @@ struct PatternDetailView: View {
                         Button("Split") { splitting = true }.buttonStyle(.secondary).disabled(finding.supportingDreams < 2)
                         Button("Dismiss") { dismissing = true }.buttonStyle(.secondary)
                     }
-                    if let description = finding.userDescription { Text(description).font(.callout) }
                     Heading("Summary & analysis")
                     if finding.status == .refreshing { Label("The explanation is being updated.", systemImage: "hourglass").font(.callout) }
                     else if let explanation = finding.explanation { Text(explanation).font(.callout) }
@@ -383,13 +381,12 @@ struct DreamPickerView: View {
     }
 }
 
-// A pattern made by hand: the user's title, an optional description and two or more supporting dreams; the AI writes only the analysis.
+// A pattern made by hand: the user's title and two or more supporting dreams, tagged or not; the AI writes only the analysis.
 struct NewPatternView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
     let model: PatternsModel
     @State private var title = ""
-    @State private var description = ""
     @State private var dreams: [JournalItem] = []
     @State private var picking = false
     var body: some View {
@@ -397,7 +394,6 @@ struct NewPatternView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 TextField("Title", text: $title).field().accessibilityIdentifier("patternTitle")
-                TextField("Description (optional)", text: $description, axis: .vertical).lineLimit(2...5).field()
                 Heading("Supporting dreams")
                 ForEach(dreams) { item in
                     HStack {
@@ -410,7 +406,7 @@ struct NewPatternView: View {
                 Button("+ Add dream") { picking = true }.buttonStyle(.quiet).accessibilityIdentifier("addPatternDream")
                 if let error = model.error { Hint(error) }
                 Button("Save pattern") { save(label) }.buttonStyle(.primary)
-                    .disabled(label.isEmpty || label.count > app.limits.maxLabelChars || description.count > app.limits.maxPatternNoteChars || dreams.count < 2 || model.isSending)
+                    .disabled(label.isEmpty || label.count > app.limits.maxLabelChars || dreams.count < 2 || model.isSending)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(24)
@@ -422,7 +418,6 @@ struct NewPatternView: View {
         }
     }
     private func save(_ label: String) {
-        let text = description.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task { if await model.create(app, label: label, description: text, dreamIds: dreams.map(\.id)) { dismiss() } }
+        Task { if await model.create(app, label: label, dreamIds: dreams.map(\.id)) { dismiss() } }
     }
 }

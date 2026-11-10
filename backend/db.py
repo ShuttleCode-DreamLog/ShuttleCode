@@ -79,9 +79,9 @@ async def open_database(path):
         # Version 6 adds the note title; CREATE TABLE IF NOT EXISTS leaves a table from an earlier version without it.
         if "title" not in {row["name"] for row in await rwdb.execute_fetchall("PRAGMA table_info(memories)")}:
             await rwdb.execute("ALTER TABLE memories ADD COLUMN title TEXT")
-        # Version 9 adds the description a user writes for a pattern they make by hand; the refresh never rewrites it.
-        if "user_description" not in {row["name"] for row in await rwdb.execute_fetchall("PRAGMA table_info(pattern_groups)")}:
-            await rwdb.execute("ALTER TABLE pattern_groups ADD COLUMN user_description TEXT")
+        # Version 9 marks dismissed patterns; they keep their tags so neither the pattern nor its tags are offered to the AI again.
+        if "dismissed_at" not in {row["name"] for row in await rwdb.execute_fetchall("PRAGMA table_info(pattern_groups)")}:
+            await rwdb.execute("ALTER TABLE pattern_groups ADD COLUMN dismissed_at INTEGER")
         await load_vectors()
         return rwdb
     except BaseException:

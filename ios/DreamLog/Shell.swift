@@ -72,7 +72,7 @@ extension View {
 
 // The prototype's bottom bar: four screens and the + that opens the dream editor, or the note editor on Life notes.
 // Patterns' + reads Add pattern and still opens the dream editor.
-// Since 10 November 2026 Patterns' + opens the new-pattern sheet: a title, an optional description and the supporting dreams.
+// Since 10 November 2026 Patterns' + opens the new-pattern sheet: a title and the supporting dreams.
 struct BottomBar: View {
     @Environment(AppModel.self) private var app
     var body: some View {

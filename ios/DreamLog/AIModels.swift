@@ -121,8 +121,6 @@ nonisolated struct Finding: Codable, Sendable, Identifiable {
     var kind: FindingKind
     var status: FindingStatus
     var explanation: String?
-    // Written by the user for a pattern they made by hand; optional until every server has it.
-    var userDescription: String?
     var supportingDreams: Int
     var periodCount: Int
     var previousCount: Int
@@ -149,7 +147,7 @@ nonisolated struct PatternsResponse: Codable, Sendable {
 // An empty label removes the user's own name and shows the generated one again.
 nonisolated struct PatternLabel: Encodable { var label: String }
 nonisolated struct PatternDream: Encodable { var dreamId: String }
-nonisolated struct PatternCreation: Encodable { var label: String; var description: String?; var dreamIds: [String] }
+nonisolated struct PatternCreation: Encodable { var label: String; var dreamIds: [String] }
 nonisolated struct PatternSplit: Encodable { var dreamIds: [String]; var label: String? }
 
 // The daily limits reset at 00:00 UTC; the app names that moment in the phone's time (wiki 4.4.6).

@@ -152,9 +152,9 @@ All four routes return the patterns response and accept optional `from_date` and
 | `GET /v1/patterns` | none | Calculated from stored rows |
 | `PUT /v1/patterns/groups/{group_id}/label` | `label` (string or null; null or empty removes the user's label) | No AI call |
 | `POST /v1/patterns/groups/{group_id}/dismiss` | `dream_id`, optional `note` | Repeating it changes only the note; an empty note removes it |
-| `POST /v1/patterns/groups` | `label`, optional `description`, `dream_ids` (two or more) | Makes a pattern by hand; returned with `user_description` |
-| `DELETE /v1/patterns/groups/{group_id}` | none | Deletes the pattern; the dreams stay |
-| `POST /v1/patterns/groups/{group_id}/dreams` | `dream_id` | Adds the dream; 409 if it already belongs or has no free tag |
+| `POST /v1/patterns/groups` | `label`, `dream_ids` (two or more) | Makes a pattern by hand; dreams need no tag |
+| `DELETE /v1/patterns/groups/{group_id}` | none | Dismisses the pattern for good; the dreams stay |
+| `POST /v1/patterns/groups/{group_id}/dreams` | `dream_id` | Adds the dream by hand; 409 if it already belongs or is kept out of patterns or AI processing |
 | `POST /v1/patterns/groups/{group_id}/split` | `dream_ids` (non-empty), optional `label`, optional `note` | A repeat answers 409; the app then calls `load()` |
 
 ```json

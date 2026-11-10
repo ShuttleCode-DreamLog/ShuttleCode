@@ -236,7 +236,6 @@ CREATE TABLE IF NOT EXISTS pattern_groups (
     label TEXT,
     user_label TEXT,
     description TEXT,
-    user_description TEXT,
     explanation TEXT,
     evidence_key TEXT,
     tried_key TEXT,
@@ -263,6 +262,15 @@ CREATE TABLE IF NOT EXISTS pattern_corrections (
     dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
     kind TEXT NOT NULL CHECK(kind IN ('dismissed','split')),
     note TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY(group_id,dream_id)
+);
+
+-- Dreams the user put into a pattern by hand; they need no tag (schema version 9).
+CREATE TABLE IF NOT EXISTS pattern_dreams (
+    group_id TEXT NOT NULL REFERENCES pattern_groups(id) ON DELETE CASCADE,
+    dream_id TEXT NOT NULL REFERENCES dreams(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at INTEGER NOT NULL,
     PRIMARY KEY(group_id,dream_id)
@@ -328,6 +336,7 @@ CREATE INDEX IF NOT EXISTS pattern_memberships_index_23 ON pattern_memberships(g
 CREATE INDEX IF NOT EXISTS pattern_memberships_index_24 ON pattern_memberships(dream_id);
 
 CREATE INDEX IF NOT EXISTS pattern_separations_index_25 ON pattern_separations(other_dream_id);
+CREATE INDEX IF NOT EXISTS pattern_dreams_index_26 ON pattern_dreams(dream_id);
 
 CREATE INDEX IF NOT EXISTS dream_vectors_index_26 ON dream_vectors(user_id);
 
