@@ -192,10 +192,12 @@ async def save_dream(request):
             timestamp = config.now()
             permissions = body.permissions or Permissions()
             values = tuple(stored[f'allow_{key}'] if stored else int(getattr(permissions, key)) for key in PERMISSIONS)
-            await connection.execute('''INSERT INTO dreams(id,user_id,text,revision,dream_date,title,mood,source,audio_status,allow_transcription,allow_analysis,allow_discussion,allow_history,allow_patterns,allow_visuals,created_at,updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(id) DO UPDATE SET text=excluded.text,revision=excluded.revision,dream_date=excluded.dream_date,title=excluded.title,mood=excluded.mood,updated_at=excluded.updated_at
-                WHERE dreams.user_id=excluded.user_id''', (dream_id, identity, body.text, revision, body.dream_date, title, mood, source, stored['audio_status'] if stored else 'expected' if source == 'voice' else 'none', *values, stored['created_at'] if stored else timestamp, timestamp))
+            # The editor sends back the title it showed, so only a different title is the user's own.
+            generated = int(stored is not None and title == stored['title'] and bool(stored['title_generated']))
+            await connection.execute('''INSERT INTO dreams(id,user_id,text,revision,dream_date,title,title_generated,mood,source,audio_status,allow_transcription,allow_analysis,allow_discussion,allow_history,allow_patterns,allow_visuals,created_at,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET text=excluded.text,revision=excluded.revision,dream_date=excluded.dream_date,title=excluded.title,title_generated=excluded.title_generated,mood=excluded.mood,updated_at=excluded.updated_at
+                WHERE dreams.user_id=excluded.user_id''', (dream_id, identity, body.text, revision, body.dream_date, title, generated, mood, source, stored['audio_status'] if stored else 'expected' if source == 'voice' else 'none', *values, stored['created_at'] if stored else timestamp, timestamp))
             if text_changed:
                 await records.dream_text_changed(connection, dream_id)
             if stored is not None and (mood != stored['mood'] or body.dream_date != stored['dream_date']):
@@ -450,11 +452,11 @@ async def organize(task):
             return tasks.Obsolete()
         if not await connection.execute_fetchall("SELECT 1 FROM outputs WHERE dream_id=? AND type='organization' AND dream_revision=?", (task['dream_id'], task['source_revision'])):
             # The generated title names a dream the user left unnamed; a title of their own is never replaced (metadata, no new revision).
-            # A title equal to an earlier generated one is still the AI's, so it follows the text after an edit (10 November 2026);
-            # it is compared before save_output deletes the earlier organization.
+            # A title the AI wrote follows the text after an edit (10 November 2026); title_generated says whose it is, so an answer
+            # without a title or a rename while this ran cannot lose track.
             if title:
-                await connection.execute('''UPDATE dreams SET title=?,updated_at=? WHERE id=? AND user_id=? AND (title IS NULL OR title IN
-                    (SELECT json_extract(content,'$.title') FROM outputs WHERE dream_id=? AND type='organization'))''', (title, config.now(), task['dream_id'], task['user_id'], task['dream_id']))
+                await connection.execute('UPDATE dreams SET title=?,title_generated=1,updated_at=? WHERE id=? AND user_id=? AND (title IS NULL OR title_generated=1)',
+                                         (title, config.now(), task['dream_id'], task['user_id']))
             output_id = await records.save_output(connection, task['user_id'], task['dream_id'], 'organization', task['source_revision'], {'summary': cut(summary, config.LIMITS['max_summary_chars']), **({'title': title} if title else {})}, model, ORGANIZE_VERSION)
             await connection.executemany('INSERT INTO tags(id,output_id,dream_id,user_id,category,text,excerpt,feeling) VALUES(?,?,?,?,?,?,?,?)', [(str(uuid4()), output_id, task['dream_id'], task['user_id'], *tag) for tag in kept])
         await tasks.complete(connection, task)

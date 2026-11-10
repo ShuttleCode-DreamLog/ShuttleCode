@@ -89,14 +89,16 @@ async def test_new_routes_require_bearer(client):
         assert (await client.request(method,path,json=note())).status_code == 401
 
 
-@pytest.mark.parametrize('version', [1, 2, 3, 4, 5, 6, 7])
+@pytest.mark.parametrize('version', [1, 2, 3, 4, 5, 6, 7, 8])
 async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     path = tmp_path / 'v1.db'
     connection = sqlite3.connect(path)
     schema = Path(db.__file__).with_name('schema.sql').read_text()
     connection.executescript(schema)
-    connection.execute('DROP VIEW visible_user_tags')
-    connection.execute('DROP TABLE imported_tag_links')
+    connection.execute('ALTER TABLE dreams DROP COLUMN title_generated')
+    if version < 8:
+        connection.execute('DROP VIEW visible_user_tags')
+        connection.execute('DROP TABLE imported_tag_links')
     if version < 7:
         connection.execute('DROP TABLE dream_user_tags')
         connection.execute('DROP TABLE user_tags')
@@ -117,6 +119,11 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     connection.execute('INSERT INTO users(id,created_at) VALUES(?,?)', (identity,1))
     connection.execute("INSERT INTO dreams(id,user_id,text,dream_date,source,created_at,updated_at) VALUES(?,?,?,'2026-10-08','text',1,1)", (dream_id,identity,'Kept sample'))
     connection.execute("INSERT INTO memories(id,user_id,text,recorded_at,event_precision,updated_at) VALUES(?,?,'Kept note',1,'unknown',1)", (str(uuid4()),identity))
+    # A title equal to the latest generated one is taken as the AI's; a title of the user's own is not.
+    titled = {'AI title': str(uuid4()), 'My title': str(uuid4())}
+    for title, titled_id in titled.items():
+        connection.execute("INSERT INTO dreams(id,user_id,text,title,dream_date,source,created_at,updated_at) VALUES(?,?,'Titled sample',?,'2026-10-08','text',1,1)", (titled_id,identity,title))
+        connection.execute("INSERT INTO outputs(id,user_id,dream_id,type,dream_revision,content,model,instruction_version,created_at) VALUES(?,?,?,'organization',1,?,'m','organize-2',1)", (str(uuid4()),identity,titled_id,'{"summary": "S.", "title": "AI title"}'))
     connection.execute(f'PRAGMA user_version={version}')
     connection.commit()
     connection.close()
@@ -124,6 +131,7 @@ async def test_additive_upgrade_keeps_existing_records(tmp_path, version):
     try:
         assert (await upgraded.execute_fetchall('PRAGMA user_version'))[0][0] == config.SCHEMA_VERSION
         assert (await upgraded.execute_fetchall('SELECT text FROM dreams WHERE id=?',(dream_id,)))[0][0] == 'Kept sample'
+        assert {title: (await upgraded.execute_fetchall('SELECT title_generated FROM dreams WHERE id=?',(titled_id,)))[0][0] for title, titled_id in titled.items()} == {'AI title': 1, 'My title': 0}
         assert [tuple(row) for row in await upgraded.execute_fetchall('SELECT title,text FROM memories')] == [(None, 'Kept note')]
         assert not await upgraded.execute_fetchall('SELECT * FROM profiles')
         assert not await upgraded.execute_fetchall('SELECT * FROM pattern_groups')

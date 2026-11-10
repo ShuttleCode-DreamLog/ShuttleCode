@@ -71,7 +71,7 @@ async def open_database(path):
             await rwdb.execute(f"PRAGMA {setting}")
         version = (await rwdb.execute_fetchall("PRAGMA user_version"))[0][0]
         exists = await rwdb.execute_fetchall("SELECT 1 FROM sqlite_master WHERE name='users'")
-        if (version or exists) and version not in (1, 2, 3, 4, 5, 6, 7, config.SCHEMA_VERSION):
+        if (version or exists) and version not in (1, 2, 3, 4, 5, 6, 7, 8, config.SCHEMA_VERSION):
             raise RuntimeError(f"Schema version {version}; expected {config.SCHEMA_VERSION}")
         # Additive upgrades preserve journals, profiles and notes from earlier versions.
         schema = Path(__file__).with_name("schema.sql").read_text()
@@ -79,6 +79,13 @@ async def open_database(path):
         # Version 6 adds the note title; CREATE TABLE IF NOT EXISTS leaves a table from an earlier version without it.
         if "title" not in {row["name"] for row in await rwdb.execute_fetchall("PRAGMA table_info(memories)")}:
             await rwdb.execute("ALTER TABLE memories ADD COLUMN title TEXT")
+        # Version 9 records whether a dream's title is the AI's, so organize renames it after an edit and never touches the user's.
+        # Before it, a title equal to the latest generated one is the best evidence that the AI wrote it.
+        if "title_generated" not in {row["name"] for row in await rwdb.execute_fetchall("PRAGMA table_info(dreams)")}:
+            await rwdb.executescript("""BEGIN IMMEDIATE;
+ALTER TABLE dreams ADD COLUMN title_generated INTEGER NOT NULL DEFAULT 0 CHECK(title_generated IN (0,1));
+UPDATE dreams SET title_generated=1 WHERE title IN (SELECT json_extract(content,'$.title') FROM outputs WHERE outputs.dream_id=dreams.id AND type='organization');
+COMMIT;""")
         await load_vectors()
         return rwdb
     except BaseException:

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS dreams (
     revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>=1),
     dream_date TEXT NOT NULL,
     title TEXT,
+    title_generated INTEGER NOT NULL DEFAULT 0 CHECK(title_generated IN (0,1)),
     mood TEXT CHECK(mood IN ('calm','happy','excited','confused','sad','anxious','afraid','angry')),
     source TEXT NOT NULL CHECK(source IN ('text','voice')),
     audio_status TEXT NOT NULL DEFAULT 'none' CHECK(audio_status IN ('none','expected','uploaded','transcribed','discarded')),

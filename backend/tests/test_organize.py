@@ -495,3 +495,10 @@ async def test_a_generated_title_follows_the_text_after_an_edit(client, clock, g
         pass
     assert edited['revision'] == 2 and [task['status'] for task in await organize_tasks(dream_id)] == ['completed', 'completed']
     assert (await dream(client, headers, dream_id))['title'] == 'A frozen lake'
+    # An answer without a title leaves the AI's title in place, and the next edit still renames it.
+    for revision, text, answer in ((2, ' Then it thawed.', ''), (3, ' Then spring came.', 'A lake in spring')):
+        await client.put(f'/v1/dreams/{dream_id}', headers=headers, json={'base_revision': revision, 'text': TEXT + text, 'dream_date': '2026-10-08', 'title': (await dream(client, headers, dream_id))['title'], 'source': 'text'})
+        gemini.answers.append({'title': answer, 'summary': SUMMARY, 'items': []})
+        while await tasks.run_once():
+            pass
+    assert (await dream(client, headers, dream_id))['title'] == 'A lake in spring'
