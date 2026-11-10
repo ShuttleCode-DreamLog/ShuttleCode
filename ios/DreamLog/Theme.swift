@@ -164,19 +164,22 @@ nonisolated struct Wrap: Layout {
         arrange(subviews, width: proposal.width ?? .infinity).size
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        for (subview, point) in zip(subviews, arrange(subviews, width: bounds.width).points) {
-            subview.place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y), proposal: .unspecified)
+        for (subview, frame) in zip(subviews, arrange(subviews, width: bounds.width).frames) {
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), proposal: ProposedViewSize(frame.size))
         }
     }
-    private func arrange(_ subviews: Subviews, width: CGFloat) -> (points: [CGPoint], size: CGSize) {
-        var x: CGFloat = 0, y: CGFloat = 0, row: CGFloat = 0, widest: CGFloat = 0, points: [CGPoint] = []
+    // A pill longer than the row wraps its own text: at its one-line width it made the row, and with it the card and the whole
+    // page, wider than the screen, so a pattern page with a long shared-element pill was cut off at both edges.
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> (frames: [CGRect], size: CGSize) {
+        var x: CGFloat = 0, y: CGFloat = 0, row: CGFloat = 0, widest: CGFloat = 0, frames: [CGRect] = []
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let ideal = subview.sizeThatFits(.unspecified)
+            let size = ideal.width > width ? subview.sizeThatFits(ProposedViewSize(width: width, height: nil)) : ideal
             if x > 0 && x + size.width > width { x = 0; y += row + spacing; row = 0 }
-            points.append(CGPoint(x: x, y: y))
+            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
             x += size.width + spacing; row = max(row, size.height); widest = max(widest, x - spacing)
         }
-        return (points, CGSize(width: widest, height: y + row))
+        return (frames, CGSize(width: widest, height: y + row))
     }
 }
 
