@@ -63,6 +63,31 @@ private struct Page<Header: View>: ViewModifier {
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) { header }
             .contentMargins(.bottom, aboveBar ? app.barHeight : 0, for: .scrollContent)
+            .gesture(KeyboardDismissal())
+    }
+}
+
+// SwiftUI has no tap-outside to put the keyboard away, and a SwiftUI tap on the page would also fire on the text input itself;
+// a UIKit tap that ignores touches inside text inputs, cancels nothing and runs beside every other gesture ends editing on
+// any other tap while buttons and rows under it still act.
+private struct KeyboardDismissal: UIGestureRecognizerRepresentable {
+    func makeUIGestureRecognizer(context: Context) -> UITapGestureRecognizer {
+        let recognizer = UITapGestureRecognizer()
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+    func handleUIGestureRecognizerAction(_ recognizer: UITapGestureRecognizer, context: Context) {
+        recognizer.view?.window?.endEditing(true)
+    }
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard let view = touch.view else { return true }
+            return !sequence(first: view, next: \.superview).contains { $0 is UITextInput }
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
 }
 

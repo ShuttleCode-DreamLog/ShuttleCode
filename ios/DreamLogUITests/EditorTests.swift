@@ -84,4 +84,32 @@ final class EditorTests: XCTestCase {
         if confirmDelete.waitForExistence(timeout: 3) { confirmDelete.tap() } else { app.buttons.matching(identifier: "Delete Dream").element(boundBy: 1).tap() }
         XCTAssertTrue(app.staticTexts["Journal"].waitForExistence(timeout: 10))
     }
+
+    func testTappingOutsideTheTextPutsTheKeyboardAway() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        let acknowledge = app.buttons["I acknowledge this notice"]
+        if app.staticTexts["Privacy notice"].waitForExistence(timeout: 3) {
+            for _ in 0..<4 where !(acknowledge.exists && acknowledge.isHittable) { app.swipeUp() }
+            acknowledge.tap()
+        }
+        XCTAssertTrue(app.buttons["tab_add"].waitForExistence(timeout: 10))
+        app.buttons["tab_add"].tap()
+        let text = app.textViews["journalText"]
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        let editing = { (text.value(forKey: "hasKeyboardFocus") as? Bool) == true }
+        text.tap(); text.typeText("Keyboard check")
+        XCTAssertTrue(editing())
+        app.staticTexts["What do you remember?"].tap()
+        XCTAssertFalse(editing())
+        // A tap inside the text keeps editing rather than putting the keyboard away again.
+        text.tap()
+        XCTAssertTrue(editing())
+        text.typeText(" again")
+        XCTAssertTrue(editing())
+        app.buttons["Discard draft"].tap()
+        app.buttons["Delete entry"].tap()
+        XCTAssertTrue(app.buttons["tab_add"].waitForExistence(timeout: 5))
+    }
 }

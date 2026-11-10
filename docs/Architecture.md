@@ -15,7 +15,7 @@ flowchart LR
 
 | Feature | Screen and state | API / backend | Storage |
 | --- | --- | --- | --- |
-| Shell | `Shell.swift`: `Header` (the prototype's title bar, `.page(...)`), `BackButton`, `HomeButton` (⌂), `BottomBar`; `RootView` shows one screen above the bar | — | — |
+| Shell | `Shell.swift`: `Header` (the prototype's title bar, `.page(...)`, whose `KeyboardDismissal` puts the keyboard away on a tap outside a text input), `BackButton`, `HomeButton` (⌂), `BottomBar`; `RootView` shows one screen above the bar | — | — |
 | Home | `Home.swift`: `HomeView` (latest dream, the Garden of pattern findings, Type a dream; shown while `AppModel.showingHome`); `Bubbles.swift`: `BubbleCluster`, `ClusterLayout` | `/v1/dreams` (the journal's first page), `/v1/patterns` | — |
 | Journal | `JournalView` (search and the `JournalFilterSheet`), `JournalModel` (with the queued-draft resend), `DreamEditor`, `DreamModel` | `/v1/dreams`, `/v1/dreams/search`, `dreams.py` (routes and the `organize` handler), `providers.py` (Gemini text adapter) | `dreams`, `outputs`, `tags`; unsent drafts in phone SQLite |
 | Dream Detail | `DreamDetail.swift`: `DreamDetailView` (switches, AI summary, tags with their corrections, analysis, context used, delete), `AnalysisModel` | `/v1/dreams/{id}/permissions`, `/corrections`, `/analysis` | as Journal and Analysis |
