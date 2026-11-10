@@ -63,20 +63,21 @@ extension FoundationTests {
 
         let analysis = Data("""
         {"analysis": {"id": "c2d4", "status": "outdated", "dream_revision": 2,
-          "sections": [{"kind": "waking_life_connections", "text": "The deadline [M1] may echo the rush.", "citations": ["DREAM", "M1"]},
+          "sections": [{"kind": "waking_life", "text": "The deadline [M1] mirrors the rush.", "citations": ["DREAM", "M1"]},
                        {"kind": "new_kind", "text": "Something else.", "citations": ["D9"]}],
           "withheld": 1,
           "context": [{"label": "DREAM", "kind": "dream", "source_id": "9f1e", "source_revision": 2, "source_date": "2026-10-15", "available": true, "cut_to": null},
                       {"label": "DESC", "kind": "output", "source_id": "o1", "source_revision": 1, "source_date": null, "available": false, "cut_to": null},
                       {"label": "M1", "kind": "memory", "source_id": "77aa", "source_revision": 1, "source_date": "2026-10-13", "available": true, "cut_to": 200, "title": "Exam week"}],
-          "removed_sources": 1, "dream_date": "2026-10-15", "mood": null, "model": "test-model", "instruction_version": "analyze-1", "created_at": 1760371200000},
+          "removed_sources": 1, "dream_date": "2026-10-15", "mood": null, "model": "test-model", "instruction_version": "analyze-2", "created_at": 1760371200000},
          "task": null}
         """.utf8)
         let read = try serverDecoder().decode(AnalysisResponse.self, from: analysis)
         let result = try #require(read.analysis)
         let note = "Exam week · \(displayDate("2026-10-13"))"
         #expect(result.context.map(\.name) == ["This dream", "This dream's summary and tags", note])
-        #expect(result.text(of: result.sections[0]) == "The deadline \(note) may echo the rush.")
+        #expect(result.sections[0].kind == .wakingLife && result.sections[0].kind.heading == "Waking Life")
+        #expect(result.text(of: result.sections[0]) == "The deadline \(note) mirrors the rush.")
         #expect(result.sources(of: result.sections[0]) == ["This dream", note])
         #expect(result.sections[1].kind == .unknown && result.sources(of: result.sections[1]) == ["A source that has since changed"])
 

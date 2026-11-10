@@ -205,6 +205,13 @@ Disabling parallel simulator clones ensures the network test uses the simulator 
 - Found and fixed in the app: the server lists one example per matched tag, so a dream with two tags in a group appeared twice in Supporting dreams, the split toggles and the dismiss buttons, with duplicate `ForEach` ids; `Finding.dreams` now lists each dream once. The dismiss note is refused in the alert when it is over the limit, as the split note already was. DreamLog unit tests: **36 passed, 1 skipped** (the gated HTTPS smoke test).
 - Seen, unchanged: after a dismissal the group's AI texts are cleared and `refresh_findings` gets one attempt plus one retry to name it (wiki 4.8.6, step 5); when both fail the group stays "Unnamed theme" with status current until its membership changes, because `tried_key` stops further paid attempts.
 
+## Four-part analysis prompt — 6 November 2026
+
+- `analyze-2` replaces the analysis instruction with the agreed spec (Dream Replay, Emotional Undercurrent, Symbols, Waking Life; English; about 350–500 words). The spec's plain-markdown output is kept inside the existing JSON schema: one section per kind, each `text` the body in markdown without its heading, so citation checking, repair, `withheld`, source rows and invalidation are unchanged. An answer missing any of the four kinds is retried.
+- Context follows the spec's input layout: `DREAM`, `DESC`, then `LIFE NOTES (most recent first; may be empty)` as `- M1 · <date>: <text>` lines. Notes are every allowed note whose date window reaches the dream (30 days, or ongoing), newest first, at most 20, instead of the top 4 by shared terms; the model chooses which fit. Earlier dreams are no longer sent, and the term-matching helpers and their constants are gone.
+- The app titles the four kinds and renders section text as inline markdown (bold, preserved line breaks). Stored `analyze-1` outputs still decode; their kinds show as "Reflection" until Update Analysis.
+- Backend: **194 passed**. The iOS changes were not built (Linux host).
+
 ## Manual tag library — 6 November 2026
 
 - `feature/manual-tag-library`: user-owned tag create/rename/delete, normalized duplicate reuse, persistent colors, per-dream selection, new-dream draft persistence and journal filtering. No new AI behavior or drag grouping.
