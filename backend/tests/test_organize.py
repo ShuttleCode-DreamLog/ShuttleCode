@@ -366,6 +366,26 @@ async def test_adapter_mints_local_tokens_with_the_configured_command(endpoint, 
     assert failure.value.category == 'provider_config'
 
 
+async def test_a_refused_token_is_minted_again_on_the_next_call(endpoint, monkeypatch, tmp_path):
+    monkeypatch.delenv('VERTEX_ACCESS_TOKEN')
+    monkeypatch.setattr(providers, 'credential', ('', 0.0))
+    mints = tmp_path / 'mints'
+    script = tmp_path / 'mint.py'
+    script.write_text(f"import pathlib\np = pathlib.Path({str(mints)!r})\nn = len(p.read_text()) if p.exists() else 0\np.write_text('x' * (n + 1))\nprint(f'token-{{n}}')\n")
+    monkeypatch.setenv('VERTEX_TOKEN_COMMAND', f'{shlex.quote(sys.executable)} {shlex.quote(str(script))}')
+    statuses = iter([401, 200])
+    async def answer(request):
+        status = next(statuses)
+        return httpx.Response(status, json=completion(json.dumps({'summary': SUMMARY, 'items': [item('place', 'lake', 'Lake')]})) if status == 200 else {'error': {'code': 401}})
+    endpoint.install(answer)
+    with pytest.raises(providers.ProviderError) as refused:
+        await call()
+    assert refused.value.category == 'provider_config'
+    await call()
+    # gcloud's cached token can expire inside the hour the adapter assumes; without dropping it every retry would be refused again.
+    assert [request.headers['authorization'] for request in endpoint.seen] == ['Bearer token-0', 'Bearer token-1']
+
+
 @pytest.mark.parametrize(('status', 'body', 'category', 'temporary'), [
     (400, '[{"error": {"code": 400, "message": "Please pass a valid API key", "status": "INVALID_ARGUMENT"}}]', 'provider_config', True),
     (400, '[{"error": {"code": 400, "message": "Invalid JSON payload"}}]', 'provider_rejected', False),
