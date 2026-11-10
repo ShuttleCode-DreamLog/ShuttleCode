@@ -42,6 +42,15 @@ struct JournalView: View {
             .sheet(isPresented: $filtering) { JournalFilterSheet(model: model, query: query) }
             .reloadable { await model.load(app) }
             .task { await model.load(app) }
+            // A dream whose title, summary and tags are still being made shows them by itself, as Dream Detail does (wiki
+            // 4.4.6, rule 3); the wait ends with the work, the tab, or a page pushed over the list, which waits on its own.
+            .task(id: awaitingWork) {
+                var pause = 2
+                while awaitingWork, (try? await Task.sleep(for: .seconds(pause))) != nil {
+                    await model.load(app)
+                    pause = min(pause * 2, 15)
+                }
+            }
             .onChange(of: query) { _, value in
                 if value.isEmpty && !model.filter.query.isEmpty { model.filter.query = ""; Task { await model.load(app) } }
             }
@@ -66,6 +75,7 @@ struct JournalView: View {
         model.filter.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         Task { await model.load(app) }
     }
+    private var awaitingWork: Bool { path.isEmpty && model.rows.contains { $0.status == .processing } }
     private var countLine: String {
         let count = model.rows.count
         let entries = "\(count)\(model.hasMore ? "+" : "") \(count == 1 ? "entry" : "entries")"
