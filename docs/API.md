@@ -10,7 +10,7 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | --- | --- | --- | --- |
 | Device settings | `GET /v1/me` | `PUT /v1/me` | `DELETE /v1/me` deletes all owned data |
 | Journal | `GET /v1/dreams`, `GET /v1/dreams/{id}` | `PUT /v1/dreams/{id}`, `PUT /v1/dreams/{id}/permissions` | `DELETE /v1/dreams/{id}` |
-| Life notes | `GET /v1/memories`, `GET /v1/memories/{id}` | `PUT /v1/memories/{id}` | `DELETE /v1/memories/{id}` |
+| Life notes | `GET /v1/memories`, `GET /v1/memories/{id}`, `POST /v1/memories/search` | `PUT /v1/memories/{id}` | `DELETE /v1/memories/{id}` |
 | Note photos | `GET /v1/memories/{id}/photos/{photo_id}` | `PUT /v1/memories/{id}/photos/{photo_id}` | `DELETE /v1/memories/{id}/photos/{photo_id}` |
 | Profile | `GET /v1/me/profile` | `PUT /v1/me/profile` | Remove keys or send empty `fields`; whole-user deletion also clears it |
 | AI tasks | In `dream.tasks` and journal `status` | `POST /v1/tasks/{id}/retry` | Deleted with their dream or the whole journal |
@@ -18,6 +18,8 @@ Send `Content-Type: application/json` for JSON bodies. Timestamps are Unix milli
 | Patterns | `GET /v1/patterns` | `PUT /v1/patterns/groups/{id}/label`, `POST …/dismiss`, `POST …/split` | Groups without members, corrections or a user label are removed by the next refresh |
 
 Lists return `{"items":[…],"has_more":false}`. Pass `limit` (1–200, default 50) and `offset` (default 0). Journal order is date descending, creation time descending, ID ascending; Notes order is recording time descending, ID ascending. Notes additionally accepts `ongoing=true` or `ongoing=false`.
+
+Note search: `POST /v1/memories/search` with `{"query":"a walk by the lake","ongoing":true}` (`ongoing` optional) and the list's paging, ranked like dream search. The wording is embedded once (one unit of the day's text allowance); on the first page, up to `MAX_SEARCH_EMBEDS` (10) notes with Allow AI use on and no vector for their current revision are embedded first, newest first, and kept in `memory_vectors`, so later searches reuse them (notes are not indexed on save). Notes within `SEARCH_MAX_DISTANCE` (0.42, measured on dreams) come back closest first with `similarity`, then notes that carry the words literally with `similarity` null; `ranked` is true. A note with Allow AI use off is never embedded, and switching it off drops its vector. When the vector extension is missing, the allowance is used up or the embedding call fails, `ranked` is false and the search is literal title/text matching in list order (`%`, `_` and `\` match themselves; letters match regardless of ASCII case). A blank query lists every note; one longer than `max_message_chars` returns 413 `too_large`.
 
 ## Journal
 
@@ -227,3 +229,15 @@ curl --cacert backend/.local/server.crt \
 ```
 
 Use the returned revision on edit. Use the same credential and ID for GET/DELETE. A separate test UUID has separate settings, profile, journals and notes. The runnable smoke test `backend/tests/smoke_https.py` exercises these operations with invented data and deletes its temporary user afterwards.
+
+## Manual tag library
+
+`GET /v1/tag-library` returns `{"tags":[{"id","text","color"}]}` for the current journal. `POST /v1/tag-library` with `{"text":"Home"}` creates a tag (201) or reuses an existing case-insensitive, whitespace-normalized name (200), returning `{"tag":{…}}`. Names contain 1–60 characters. The stable color is one of `sage`, `blue`, `rose`, `amber`, `violet`, `teal`.
+
+`PUT /v1/tag-library/{id}` with `{"text":"New name"}` renames the tag everywhere it is attached and returns the library; a duplicate name returns 409. `DELETE /v1/tag-library/{id}` returns 204 and removes its associations from dreams, without touching dream text or AI-generated tags.
+
+Dream responses include `custom_tags`. `PUT /v1/dreams/{id}/tags` with `{"tag_ids":["<UUID>"]}` replaces the dream's manual selection and returns the dream. The normal dream save also accepts optional `tag_ids`, allowing new entries to save their text and tags atomically. Omitting this field preserves the selection; an empty list clears it. Up to 50 owned tags may be attached; unavailable/foreign IDs return 404 without partial changes. Manual tags appear in journal rows and tag filters independently of AI output. None of these operations schedules AI generation.
+
+Schema 8 includes `user_tags`, `dream_user_tags` and `imported_tag_links` with cascading journal/dream deletion. The phone's local draft schema 2 adds nullable `tag_ids`, preserving version 1 drafts. Drag grouping, default libraries and AI selection/recommendation are outside this increment.
+
+Existing current dream tags are imported into the library by normalized name and shown as selected on their source dreams. Journal rows, detail selection and filters share `visible_user_tags`. Import links preserve original categories and stop deleted or deselected tags reappearing on reload; obsolete AI output stops contributing its automatic associations. Renaming a library tag updates its displayed name on every linked dream without changing original AI output or triggering generation. The picker uses a dark system blur material.

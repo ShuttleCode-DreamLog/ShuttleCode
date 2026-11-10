@@ -3,6 +3,26 @@ import Testing
 @testable import DreamLog
 
 extension FoundationTests {
+    @Test(arguments: [nil, false, true] as [Bool?])
+    func dreamLoadsWithOptionalSummaryCorrectionFlag(_ corrected: Bool?) async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let id = newID()
+        var payload = try #require(JSONSerialization.jsonObject(with: dreamResponse(journalDream(id: id))) as? [String: Any])
+        var dream = try #require(payload["dream"] as? [String: Any])
+        var organization: [String: Any] = ["status": "current", "dream_revision": 1, "summary": "An invented summary.", "tags": [], "created_at": 1000]
+        if let corrected { organization["summary_corrected"] = corrected }
+        dream["organization"] = organization
+        payload["dream"] = dream
+        enqueue([(200, try JSONSerialization.data(withJSONObject: payload))])
+        let model = DreamModel(id: id)
+        await model.load(app)
+        #expect(model.error == nil)
+        #expect(model.dream?.organization?.summary == "An invented summary.")
+        #expect(model.dream?.organization?.summaryCorrected == corrected)
+        await closeJournalApp(app)
+    }
+
     @Test func closingJournalSavesAutomaticallyAndRevertDiscardsChanges() async throws {
         let (app, identity, defaults, namespace) = try await journalApp()
         defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
@@ -179,6 +199,55 @@ extension FoundationTests {
         await model.delete(app)
         let removed = try await app.store.draft(id).get()
         #expect(model.deleted && removed == nil)
+        await closeJournalApp(app)
+    }
+}
+
+extension FoundationTests {
+    @Test func manualTagsSurviveDraftReopenAndEncodeAnExplicitEmptySelection() async throws {
+        let folder = URL.temporaryDirectory.appending(path: "tag-draft-\(newID())")
+        let store = LocalStore(folder: folder)
+        try await store.open().get()
+        var draft = Draft(dreamId: newID(), dreamDate: journalDate())
+        draft.text = "An invented tagged dream."
+        draft.tagIds = [newID(), newID()]
+        try await store.saveDraft(draft).get()
+        let reopened = LocalStore(folder: folder)
+        try await reopened.open().get()
+        let saved = try #require(try await reopened.draft(draft.dreamId).get())
+        #expect(saved.tagIds == draft.tagIds)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved.save)) as? [String: Any])
+        #expect(encoded["tag_ids"] as? [String] == draft.tagIds)
+        draft.tagIds = []
+        let cleared = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.save)) as? [String: Any])
+        #expect(cleared["tag_ids"] as? [String] == [])
+        draft.tagIds = nil
+        let legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.save)) as? [String: Any])
+        #expect(legacy["tag_ids"] == nil)
+        try await reopened.deleteEverything().get()
+        try await store.deleteEverything().get()
+    }
+
+    @Test func tagLibraryUsesServerIDsAndPreservesNamesAfterFailedRename() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let library = TagLibraryModel()
+        let id = newID()
+        enqueue([(200, Data("{\"tags\":[]}".utf8))])
+        await library.load(app)
+        #expect(library.loaded && library.tags.isEmpty)
+        enqueue([(201, Data("{\"tag\":{\"id\":\"\(id)\",\"text\":\"Home\",\"color\":\"sage\"}}".utf8))])
+        let tag = try #require(await library.create(app, text: "Home"))
+        #expect(library.tags.map(\.id) == [id])
+        let request = try #require(lastRequest())
+        #expect(request.url?.path() == "/v1/tag-library" && request.httpMethod == "POST")
+        #expect(sentBody(request)?["text"] as? String == "Home")
+        enqueue([(409, Data("{\"error\":\"duplicate_tag\",\"message\":\"Already exists\"}".utf8))])
+        await library.rename(app, tag: tag, text: "Work")
+        #expect(library.tags.first?.text == "Home" && library.error != nil)
+        enqueue([(204, Data())])
+        #expect(await library.delete(app, tag: tag))
+        #expect(library.tags.isEmpty)
         await closeJournalApp(app)
     }
 }

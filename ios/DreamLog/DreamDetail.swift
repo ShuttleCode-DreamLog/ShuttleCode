@@ -82,6 +82,20 @@ let dreamSwitches: [(key: String, path: WritableKeyPath<Permissions, Bool>, titl
 let historyOffLine = "Turning this off removes the parts of analyses that cite it and starts the discussions that used it afresh. Turning it on again does not bring them back."
 let correctionLine = "A correction marks the analysis as outdated and starts the discussion afresh."
 
+// The dream page's sections a user can reorder (Re-Design list, AI use); the date row stays first and AI use stays last.
+nonisolated enum DreamSection: String, CaseIterable, Identifiable {
+    case tags, originalText, summary, analysis
+    var id: String { rawValue }
+    var title: String { switch self { case .tags: "Tags"; case .originalText: "Original text"; case .summary: "Summary"; case .analysis: "Analysis" } }
+}
+let dreamSectionOrderKey = "dreamSectionOrder"
+// A stored order drops names it does not know and appends sections it lacks, so adding a section later keeps a user's order.
+nonisolated func dreamSections(_ stored: String) -> [DreamSection] {
+    let known = stored.split(separator: ",").compactMap { DreamSection(rawValue: String($0)) }
+    let unique = known.enumerated().filter { known.firstIndex(of: $0.element) == $0.offset }.map(\.element)
+    return unique + DreamSection.allCases.filter { !unique.contains($0) }
+}
+
 // The prototype's dream page: date and Delete, tags, Original text, Summary, Analysis; the sources and AI switches follow below.
 struct DreamDetailView: View {
     @Environment(AppModel.self) private var app
@@ -90,7 +104,10 @@ struct DreamDetailView: View {
     @State private var analysis: AnalysisModel
     @State private var editing = false
     @State private var showSwitches = false
-    @State private var showMore = false
+    @State private var showingSources = false
+    @State private var arranging = false
+    @State private var collapsed: Set<String> = []
+    @AppStorage(dreamSectionOrderKey) private var sectionOrder = ""
     @State private var confirmingDelete = false
     @State private var confirmingKeepOut = false
     @State private var confirmingHistoryOff = false
@@ -114,32 +131,11 @@ struct DreamDetailView: View {
                         Spacer()
                         Button("Delete Dream", role: .destructive) { confirmingDelete = true }.buttonStyle(.quiet)
                     }
-                    tagsBlock(dream)
-                    Heading("Original text")
-                    Text(dream.text).font(.callout).textSelection(.enabled)
-                    if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
-                    Button("Edit text") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
-                    Heading("Summary")
-                    organizationBlock(dream)
-                    Heading("Analysis")
-                    analysisBlock(dream)
-                    if !dream.permissions.discussion { Hint("Discussion is off") }
-                    else if !dream.text.isEmpty {
-                        NavigationLink(value: Route.conversation(id, title: dream.title ?? "Dream")) {
-                            Label("Conversation analysis", systemImage: "bubble.left.and.bubble.right")
-                        }.buttonStyle(.primary).padding(.top, 8)
-                    }
                     // Sources and the AI switches are kept off the prototype's page until asked for.
-                    DisclosureGroup("More", isExpanded: $showMore) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if let value = analysis.analysis {
-                                Text("Information used for this analysis").font(.callout.weight(.semibold)).padding(.top, 8)
-                                contextBlock(value, dream: dream)
-                            }
-                            Text("AI use").font(.callout.weight(.semibold)).padding(.top, 8)
-                            permissionsBlock(dream)
-                        }
-                    }.font(.callout).padding(.top, 14)
+                    ForEach(dreamSections(sectionOrder)) { section in sectionBlock(section, dream: dream) }
+                    Button("Arrange sections") { arranging = true }.buttonStyle(.quiet).padding(.top, 8).accessibilityIdentifier("arrangeSections")
+                    foldHeading("AI use", key: "aiUse")
+                    if !collapsed.contains("aiUse") { permissionsBlock(dream) }
                 } else if model.isLoading { ProgressView("Loading dream…") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -149,6 +145,38 @@ struct DreamDetailView: View {
         .page(Header(model.dream?.title ?? "Dream", leading: { BackButton() }, trailing: { HomeButton() }))
         .sheet(isPresented: $editing, onDismiss: { Task { await load() } }) {
             NavigationStack { DreamEditorView(id: id, presented: true) }
+        }
+        // The sheet is its own presentation, so it carries the routes its note and dream links open.
+        .sheet(isPresented: $showingSources, onDismiss: { Task { await load() } }) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let value = analysis.analysis, let dream = model.dream { contextBlock(value, dream: dream) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(24)
+                }
+                .dreamPage()
+                .page(Header("Information used", leading: { BackButton(label: "Done") { showingSources = false } }, trailing: { EmptyView() }), aboveBar: false)
+                .routeDestinations()
+            }
+        }
+        .sheet(isPresented: $arranging) {
+            NavigationStack {
+                List {
+                    ForEach(dreamSections(sectionOrder)) { Text($0.title) }
+                        .onMove { from, to in
+                            var order = dreamSections(sectionOrder)
+                            order.move(fromOffsets: from, toOffset: to)
+                            sectionOrder = order.map(\.rawValue).joined(separator: ",")
+                        }
+                    Button("Reset to default") { sectionOrder = "" }.disabled(sectionOrder.isEmpty)
+                }
+                .environment(\.editMode, .constant(.active))
+                .dreamPage()
+                .page(Header("Arrange sections", leading: { BackButton(label: "Done") { arranging = false } }, trailing: { EmptyView() }), aboveBar: false)
+            }
+            .presentationDetents([.medium])
         }
         .task { await load() }
         .reloadable { await load() }
@@ -189,31 +217,57 @@ struct DreamDetailView: View {
 
     // Tags are pills; each opens its corrections, and a removed tag stays, struck through, until it is restored.
     @ViewBuilder private func tagsBlock(_ dream: Dream) -> some View {
-        if let organization = dream.organization {
-            let editable = organization.status == .current
-            Wrap(spacing: 6) {
-                ForEach(organization.tags.filter { !$0.removed }) { tag in
-                    Menu {
-                        Section("\(tag.category.rawValue.capitalized)\(tag.feeling == .inferred ? " · inferred" : "")\(tag.corrected ? " · your correction" : "") · “\(tag.excerpt)”") {
-                            Button("Show dreams with this tag", systemImage: "line.3.horizontal.decrease") { app.showJournal(tag: tag.text) }
-                            if editable {
-                                Button("Rename…", systemImage: "pencil") { correctionText = tag.text; correcting = .tag(tag) }
-                                if tag.corrected { Button("Restore “\(tag.originalText)”", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
-                                Button("Remove", systemImage: "minus.circle", role: .destructive) {
-                                    Task { await model.correct(app, DreamCorrection(category: tag.category.rawValue, originalText: tag.originalText, text: "")) }
-                                }
-                            }
-                        }
-                    } label: { Pill(tag.text) }
-                }
-                ForEach(organization.tags.filter(\.removed)) { tag in
-                    Menu {
-                        if editable { Button("Restore", systemImage: "arrow.uturn.backward") { Task { await restore(tag) } } }
-                    } label: { Pill(tag.originalText, struck: true) }
-                    .accessibilityLabel("Removed tag \(tag.originalText)")
+        TagSelectionControl(selectedIDs: dream.customTags?.map(\.id) ?? [], initialTags: dream.customTags ?? []) { ids in
+            await model.saveTags(app, ids: ids)
+        }
+    }
+
+    @ViewBuilder private func sectionBlock(_ section: DreamSection, dream: Dream) -> some View {
+        // Every section folds under its heading (Re-Design list, 6 November 2026); the tags get a heading so they can fold too.
+        if section == .analysis {
+            // Supporting life notes sit beside the analysis they informed (Re-Design list, Life notes 3).
+            HStack(alignment: .firstTextBaseline) {
+                foldHeading(section.title, key: section.rawValue)
+                Spacer()
+                if let value = analysis.analysis {
+                    Button("Supporting life notes (\(value.context.count { $0.kind == .memory })) ›") { showingSources = true }
+                        .buttonStyle(.quiet).accessibilityIdentifier("analysisSources")
                 }
             }
-            .disabled(model.isSending)
+        } else {
+            foldHeading(section.title, key: section.rawValue)
+        }
+        if !collapsed.contains(section.rawValue) { sectionContent(section, dream: dream) }
+    }
+    private func foldHeading(_ title: String, key: String) -> some View {
+        let folded = collapsed.contains(key)
+        return Button { withAnimation(.snappy) { collapsed.formSymmetricDifference([key]) } } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "chevron.down").font(.callout.weight(.semibold)).rotationEffect(.degrees(folded ? -90 : 0)).foregroundStyle(Color.muted)
+                Heading(title)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(folded ? "Collapsed" : "Expanded")
+        .accessibilityIdentifier("fold-\(key)")
+    }
+    @ViewBuilder private func sectionContent(_ section: DreamSection, dream: Dream) -> some View {
+        switch section {
+        case .tags: tagsBlock(dream)
+        case .originalText:
+            Text(dream.text).font(.callout).textSelection(.enabled)
+            if let mood = dream.mood { Hint("Mood · \(mood.rawValue.capitalized)") }
+            Button("Edit text") { editing = true }.buttonStyle(.secondary).disabled(model.isSending).accessibilityIdentifier("Edit Dream")
+        case .summary: organizationBlock(dream)
+        case .analysis:
+            analysisBlock(dream)
+            if !dream.permissions.discussion { Hint("Discussion is off") }
+            else if !dream.text.isEmpty {
+                NavigationLink(value: Route.conversation(id, title: dream.title ?? "Dream")) {
+                    Label("Conversation analysis", systemImage: "bubble.left.and.bubble.right")
+                }.buttonStyle(.primary).padding(.top, 8)
+            }
         }
     }
 
@@ -255,7 +309,7 @@ struct DreamDetailView: View {
             if let organization = dream.organization {
                 if organization.status != .current { Hint("Outdated after an edit") }
                 Text(organization.summary).font(.callout)
-                if organization.summaryCorrected { Hint("Your correction") }
+                if organization.summaryCorrected == true { Hint("Your correction") }
                 if organization.status == .current {
                     Button("Correct summary") { correctionText = organization.summary; correcting = .summary }.buttonStyle(.quiet)
                 }

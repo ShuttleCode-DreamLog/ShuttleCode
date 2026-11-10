@@ -108,6 +108,24 @@ final class DreamModel {
             _ = await persist(kept, app: app)
         }
     }
+    func saveTags(_ app: AppModel, ids: [String]) async -> Bool {
+        guard !isSending, current(app), let client = app.client else { return false }
+        isSending = true
+        defer { isSending = false }
+        let result = await client.saveDreamTags(id, ids: ids)
+        guard current(app) else { return false }
+        switch result {
+        case let .success(value):
+            dream = value
+            if var draft {
+                draft.tagIds = value.customTags?.map(\.id); self.draft = draft
+                guard await persist(draft, app: app) else { return false }
+            }
+            app.refreshes += 1; error = nil
+            return true
+        case let .failure(failure): error = failure.message; return false
+        }
+    }
     func canSave(_ app: AppModel) -> Bool {
         guard let draft else { return false }
         let length = draft.text.unicodeScalars.count

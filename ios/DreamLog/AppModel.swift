@@ -204,6 +204,6 @@ final class AppModel {
     var answeredOffers: Set<String> { Set(defaults.stringArray(forKey: answeredOffersKey) ?? []) }
     func answerOffer(_ replyId: String) { defaults.set(Array(answeredOffers.union([replyId])), forKey: answeredOffersKey) }
     private func clearDefaults() {
-        for key in [noticeKey, noticeContentKey, reminderKey, answeredOffersKey] { defaults.removeObject(forKey: key) }
+        for key in [noticeKey, noticeContentKey, reminderKey, answeredOffersKey, dreamSectionOrderKey] { defaults.removeObject(forKey: key) }
     }
 }

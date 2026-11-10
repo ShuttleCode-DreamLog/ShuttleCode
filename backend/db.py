@@ -53,7 +53,7 @@ async def load_vectors():
         await rwdb.enable_load_extension(True)
         await rwdb.load_extension(str(vector_path()))
         await rwdb.enable_load_extension(False)
-        for table in ("dream_vectors", "occurrences"):
+        for table in ("dream_vectors", "memory_vectors", "occurrences"):
             await rwdb.execute_fetchall(f"SELECT vector_init('{table}', 'embedding', 'type=FLOAT32,dimension={config.EMBEDDING_DIMENSIONS},distance=COSINE')")
         vectors = True
     except (sqlite3.Error, AttributeError, OSError) as error:
@@ -71,7 +71,7 @@ async def open_database(path):
             await rwdb.execute(f"PRAGMA {setting}")
         version = (await rwdb.execute_fetchall("PRAGMA user_version"))[0][0]
         exists = await rwdb.execute_fetchall("SELECT 1 FROM sqlite_master WHERE name='users'")
-        if (version or exists) and version not in (1, 2, 3, 4, 5, config.SCHEMA_VERSION):
+        if (version or exists) and version not in (1, 2, 3, 4, 5, 6, 7, config.SCHEMA_VERSION):
             raise RuntimeError(f"Schema version {version}; expected {config.SCHEMA_VERSION}")
         # Additive upgrades preserve journals, profiles and notes from earlier versions.
         schema = Path(__file__).with_name("schema.sql").read_text()
