@@ -63,6 +63,25 @@ extension FoundationTests {
         await closeJournalApp(app)
     }
 
+    @Test func editorOpenedWithEditStartsEditingOverAStoredSavedDraft() async throws {
+        let (app, identity, defaults, namespace) = try await journalApp()
+        defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }
+        let id = newID()
+        let created = DreamModel(id: id, newEntry: true)
+        await created.load(app)
+        created.change(app) { $0.text = "An invented dream." }
+        enqueue([(201, try dreamResponse(journalDream(id: id)))])
+        #expect(await created.close(app))
+        // The sheet closes the editor once more as it disappears, which stores the saved dream as a draft with nothing unsent.
+        #expect(await created.close(app))
+        #expect(try await app.store.draft(id).get()?.unsent == false)
+        enqueue([(200, try dreamResponse(journalDream(id: id)))])
+        let editor = DreamModel(id: id, editing: true)
+        await editor.load(app)
+        #expect(editor.isEditing)
+        await closeJournalApp(app)
+    }
+
     @Test func storedTrailingBlankLinesStayWhenOnlyTheMoodChanges() async throws {
         let (app, identity, defaults, namespace) = try await journalApp()
         defer { _ = identity.delete(); defaults.removePersistentDomain(forName: namespace) }

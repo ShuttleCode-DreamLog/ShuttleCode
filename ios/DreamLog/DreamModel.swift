@@ -71,7 +71,9 @@ final class DreamModel {
         }
         guard await flush(app), current(app) else { return }
         switch await app.store.draft(id) {
-        case let .success(value): if let value { draft = value; isEditing = value.unsent }
+        // Closing an editor stores the saved dream as a draft with nothing unsent; that copy must not turn an editor opened
+        // with Edit back into reading, so a stored draft can only start editing.
+        case let .success(value): if let value { draft = value; isEditing = isEditing || value.unsent }
         case .failure: error = "Could not read this draft. Unlock the phone and try again."; return
         }
         if draft == nil && newEntry && dream == nil {

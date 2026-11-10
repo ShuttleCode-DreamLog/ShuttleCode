@@ -71,9 +71,14 @@ final class EditorTests: XCTestCase {
         journalEditor.tap(); journalEditor.typeText(" Discard this edit.")
         app.buttons["revertJournal"].tap()
         app.buttons["Revert changes"].tap()
-        XCTAssertTrue(app.staticTexts["Original invented dream."].waitForExistence(timeout: 5))
+        // Revert turns the editor opened with Edit back to reading the stored dream; the dream's own page underneath shows the
+        // same text, so the editor's text box going away is what says the revert happened.
+        XCTAssertTrue(journalEditor.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Original invented dream."].exists)
         XCTAssertFalse(app.staticTexts["Original invented dream. Discard this edit."].exists)
+        // Reading, the editor's ‹ Done closes it; until it is gone it covers Delete Dream on the page underneath.
         app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["Done"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 5))
         let deleteDream = app.buttons["Delete Dream"]
         for _ in 0..<10 where !(deleteDream.exists && deleteDream.isHittable) { app.swipeUp() }
