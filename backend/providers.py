@@ -95,6 +95,36 @@ async def complete_json(instruction, content, schema, name, answer_type, tempera
         raise ProviderError("invalid_output", True) from None
 
 
+async def stream_text(instruction, messages):
+    model = os.environ["TEXT_MODEL"]
+    payload = {"model": f"google/{model}", "stream": True, "messages": [{"role": "system", "content": instruction}, *messages]}
+    headers = await authorization()
+    finish = ""
+    try:
+        async with asyncio.timeout(config.PROVIDER_TIMEOUT_SECONDS):
+            async with client.stream("POST", TEXT_URL.format(project=os.environ["VERTEX_PROJECT"]), json=payload, headers=headers) as response:
+                if response.status_code >= 400:
+                    body = (await response.aread()).decode(errors="replace")
+                    # A prompt blocked by the safety filter answers 400 before any piece on the streaming endpoint.
+                    raise ProviderError("provider_refused", False) if response.status_code == 400 and any(word in body.lower() for word in ("safety", "blocked")) else failure(response.status_code, body, model)
+                async for line in response.aiter_lines():
+                    data = line.removeprefix("data:").strip() if line.startswith("data:") else ""
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        choice = msgspec.json.decode(data)["choices"][0]
+                    except (msgspec.DecodeError, KeyError, IndexError, TypeError):
+                        raise ProviderError("invalid_output", True) from None
+                    finish = choice.get("finish_reason") or finish
+                    if finish == "content_filter":
+                        raise ProviderError("provider_refused", False)
+                    if piece := (choice.get("delta") or {}).get("content"):
+                        yield piece
+    except (TimeoutError, httpx.TransportError):
+        raise ProviderError("network", True) from None
+    logger.info("model=%s stream finish=%s", model, finish)
+
+
 async def embed(texts, timeout=None):
     model, vectors = os.environ["EMBEDDING_MODEL"], []
     url, headers = EMBED_URL.format(project=os.environ["VERTEX_PROJECT"], model=model), await authorization()
