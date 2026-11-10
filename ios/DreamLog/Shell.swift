@@ -108,7 +108,8 @@ struct BottomBar: View {
                 VStack(spacing: 4) {
                     Image(systemName: "plus").font(.system(size: 22, weight: .medium)).foregroundStyle(.white)
                         .frame(width: 42, height: 32).background(Color.sage, in: RoundedRectangle(cornerRadius: 12))
-                    Text(addLabel).font(.caption2).foregroundStyle(Color.muted)
+                    // Five equal columns leave about 74 points; a label that wrapped would make the whole bar taller.
+                    Text(addLabel).font(.caption2).lineLimit(1).minimumScaleFactor(0.6).foregroundStyle(Color.muted)
                 }.frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain).accessibilityIdentifier("tab_add")
@@ -135,7 +136,7 @@ struct BottomBar: View {
         return Button { app.tab = tab; app.showingHome = false } label: {
             VStack(spacing: 4) {
                 Image(systemName: icon).font(.system(size: 22)).frame(height: 32)
-                Text(title).font(.caption2)
+                Text(title).font(.caption2).lineLimit(1).minimumScaleFactor(0.6)
             }
             .foregroundStyle(active ? Color.sage : Color.muted)
             .frame(maxWidth: .infinity)
