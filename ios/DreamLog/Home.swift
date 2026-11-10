@@ -32,11 +32,21 @@ struct HomeView: View {
             .navigationDestination(for: PatternRoute.self) { route in PatternDetailView(groupId: route.groupId, model: patterns) }
             .reloadable { await load() }
             .task { await load() }
+            // The latest dream's title and the Garden bubbles its patterns join show by themselves while the server works on it,
+            // as on Journal (wiki 4.4.6, rule 3); the wait ends with the work, the tab, or a page pushed over Home.
+            .task(id: awaitingWork) {
+                var pause = 2
+                while awaitingWork, (try? await Task.sleep(for: .seconds(pause))) != nil {
+                    await load()
+                    pause = min(pause * 2, 15)
+                }
+            }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await load() } } }
             .onChange(of: app.refreshes) { Task { await load() } }
             .onChange(of: app.homeVisits) { path = NavigationPath() }
         }
     }
+    private var awaitingWork: Bool { path.isEmpty && model.rows.first { $0.item != nil }?.status == .processing }
     private func load() async {
         async let dreams: Void = model.load(app)
         async let findings: Void = patterns.load(app)
