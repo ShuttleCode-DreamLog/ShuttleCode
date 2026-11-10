@@ -46,7 +46,8 @@ def section(kind, text='A grounded reading.', citations=('DREAM',)):
     return {'kind': kind, 'text': text, 'citations': list(citations)}
 
 
-BASE = [section('what_happened', 'You missed a train by a frozen lake.'), section('reflection_questions', 'What did the frozen lake feel like?')]
+BASE = [section('dream_replay', 'You run for a train beside a frozen lake.'), section('emotional_undercurrent', 'Your breath catches.'),
+        section('symbols', '- **Train:** A departure that will not wait.'), section('waking_life', 'Dreams of missed departures tend to accompany crowded weeks.')]
 
 
 async def journal(client, text=TEXT, headers=None, dream_date='2026-10-10', **fields):
@@ -90,16 +91,6 @@ async def analyze_task(dream_id):
     return (await db.rwdb.execute_fetchall("SELECT * FROM tasks WHERE dream_id=? AND type='analyze' ORDER BY rowid DESC", (dream_id,)))[0]
 
 
-def test_term_matching_words_and_terms():
-    assert analysis.term_in('car', 'A red car.') and not analysis.term_in('car', 'I was scared') and not analysis.term_in('car', 'cars')
-    assert analysis.term_in('missed train', 'I MISSED  train'.replace('  ', ' ')) and analysis.term_in('room 4', 'in room 4.') and not analysis.term_in('room 4', 'room 42')
-    assert analysis.term_in('图书馆', '我在图书馆里') and analysis.term_in('猫', '一只白猫') and not analysis.term_in('', 'text')
-    assert analysis.words('café́ train. 2026 well-known') == ['café́', 'train', 'well', 'known']
-    assert analysis.dream_terms([], 'Their teacher waited beside frozen trains, frozen again before the station.') == ['teacher', 'waited', 'beside', 'frozen', 'trains', 'station']
-    assert analysis.dream_terms(['lake', 'lake', 'train'], 'ignored text') == ['lake', 'train']
-    assert len(analysis.dream_terms([], ' '.join(f'word{chr(97 + n // 26)}{chr(97 + n % 26)}x' for n in range(80)))) == 50
-
-
 def test_memory_days_and_window():
     utc = timezone.utc
     at = lambda day: int(datetime.fromisoformat(day).replace(tzinfo=utc).timestamp() * 1000)
@@ -110,13 +101,13 @@ def test_memory_days_and_window():
     assert analysis.memory_days(upcoming, utc, None) == (date(2026, 10, 1), date(2026, 10, 20), False)
     assert analysis.memory_days(direct, utc, None) == (date(2026, 10, 12), date(2026, 10, 12), True)
     assert analysis.memory_days(direct, utc, date(2026, 10, 9)) == (date(2026, 10, 3), date(2026, 10, 9), False)
-    score = lambda memory, dream_day, terms=(): analysis.memory_score(memory, analysis.memory_days(memory, utc, None), date.fromisoformat(dream_day), list(terms))
-    assert [score(later, day) for day in ('2026-10-01', '2026-10-31', '2026-11-01')] == [1, 1, 0]
-    assert [score(direct, day) for day in ('2026-09-12', '2026-09-11', '2026-11-11', '2026-11-12')] == [1, 0, 1, 0]
-    assert score(later | {'is_ongoing': 1}, '2027-06-01') == 1 and score(later | {'text': 'the train and the lake'}, '2027-06-01', ['train', 'lake']) == 4
+    inside = lambda memory, dream_day: analysis.in_window(memory, analysis.memory_days(memory, utc, None), date.fromisoformat(dream_day))
+    assert [inside(later, day) for day in ('2026-10-01', '2026-10-31', '2026-11-01')] == [True, True, False]
+    assert [inside(direct, day) for day in ('2026-09-12', '2026-09-11', '2026-11-11', '2026-11-12')] == [True, False, True, False]
+    assert inside(later | {'is_ongoing': 1}, '2027-06-01')
 
 
-async def test_context_selects_memories_by_terms_window_and_ongoing(client, clock, monkeypatch):
+async def test_context_sends_recent_notes_newest_first_and_no_earlier_dreams(client, clock, monkeypatch):
     headers, user, dream_id = await journal(client)
     await organized(user, dream_id)
     ids = {}
@@ -127,32 +118,17 @@ async def test_context_selects_memories_by_terms_window_and_ongoing(client, cloc
         clock['ms'] = NOON + offset * DAY
         ids[name] = await note(client, headers, **fields)
     clock['ms'] = NOON
-    chosen = [(source['label'], next(name for name, memory_id in ids.items() if memory_id == source['source_id'])) for source in await context(dream_id) if source['kind'] == 'memory']
-    assert chosen == [('M1', 'ongoing2'), ('M2', 'ongoing'), ('M3', 'future'), ('M4', 'both')]
+    await journal(client, text='A train crossed a frozen lake.', headers=headers, dream_date='2026-10-01')
+    sources = await context(dream_id)
+    chosen = [(source['label'], next(name for name, memory_id in ids.items() if memory_id == source['source_id'])) for source in sources if source['kind'] == 'memory']
+    assert chosen == [('M1', 'future'), ('M2', 'both'), ('M3', 'window'), ('M4', 'ongoing2'), ('M5', 'ongoing')]
+    assert not [source for source in sources if source['kind'] == 'dream']
+    assert [source['body'] for source in sources if source['label'] in ('M1', 'M4')] == ['2026-10-30: Train trip planned.', '2026-08-21: Job hunting. (ongoing)']
     assert [source['label'] for source in await context(dream_id, use_history=0)] == ['DESC']
     _, _, early = await journal(client, text='A frozen lake and a train.', headers=headers, dream_date='2026-09-20')
-    early_names = {next(name for name, memory_id in ids.items() if memory_id == source['source_id']) for source in await context(early) if source['kind'] == 'memory'}
-    assert early_names.isdisjoint({'both', 'future', 'window'}) and {'ongoing2', 'ongoing'} <= early_names
-    monkeypatch.setattr(config, 'MAX_CONTEXT_MEMORIES', 20)
-    roomy = {next(name for name, memory_id in ids.items() if memory_id == source['source_id']) for source in await context(dream_id) if source['kind'] == 'memory'}
-    assert roomy == {'ongoing2', 'ongoing', 'future', 'both', 'old_train', 'window'}
-
-
-async def test_context_selects_earlier_dreams_by_matching_terms(client, clock, monkeypatch):
-    headers, user, dream_id = await journal(client)
-    await organized(user, dream_id)
-    earlier = {}
-    for name, day, text in (('two_terms', '2026-10-01', 'A train crossed a frozen lake.'), ('tag_match', '2026-09-01', 'Night ride.'), ('one_term', '2026-10-02', 'Only a lake here.'),
-                            ('after', '2026-10-11', 'Train by the lake again.'), ('closed', '2026-10-03', 'Train and lake, private.'), ('long', '2026-09-15', 'Train and lake. ' + 'x' * 2000)):
-        _, _, earlier[name] = await journal(client, text=text, headers=headers, dream_date=day, permissions={'history': name != 'closed'})
-    await organized(user, earlier['tag_match'], summary='Night train by the lake.', tags=(('object', 'train', 'ride'),))
-    chosen = [source for source in await context(dream_id) if source['kind'] == 'dream']
-    names = [next(name for name, value in earlier.items() if value == source['source_id']) for source in chosen]
-    assert names == ['two_terms', 'long', 'tag_match'] and [source['label'] for source in chosen] == ['D1', 'D2', 'D3']
-    long = next(source for source in chosen if source['source_id'] == earlier['long'])
-    assert long['cut_to'] == 1500 and len(long['text']) == 1500 and chosen[0]['cut_to'] is None
-    monkeypatch.setattr(config, 'MAX_CONTEXT_DREAMS', 20)
-    assert {source['source_id'] for source in await context(dream_id) if source['kind'] == 'dream'} == {earlier['two_terms'], earlier['long'], earlier['tag_match']}
+    assert {next(name for name, memory_id in ids.items() if memory_id == source['source_id']) for source in await context(early) if source['kind'] == 'memory'} == {'ongoing2', 'ongoing'}
+    monkeypatch.setattr(config, 'MAX_CONTEXT_MEMORIES', 2)
+    assert [source['source_id'] for source in await context(dream_id) if source['kind'] == 'memory'] == [ids['future'], ids['both']]
 
 
 async def test_analyze_saves_checked_sections_and_sources(client, clock, gemini):
@@ -160,49 +136,47 @@ async def test_analyze_saves_checked_sections_and_sources(client, clock, gemini)
     desc = await organized(user, dream_id)
     clock['ms'] = NOON - 2 * DAY
     memory_id = await note(client, headers, 'Exam deadline at the station office.', event_date='2026-10-08', title='Exam week')
-    _, _, earlier = await journal(client, text='A train stopped at a frozen lake.', headers=headers, dream_date='2026-09-30')
+    await journal(client, text='A train stopped at a frozen lake.', headers=headers, dream_date='2026-09-30')
     clock['ms'] = NOON
     gemini.answers.append({'sections': [
-        section('reflection_questions', 'What did missing it mean?\nWho waved?\nA third question.'),
-        section('what_happened', 'You missed a train [DESC].'),
-        section('waking_life_connections', 'The deadline may echo the rush.', ['M1', 'DREAM']),
-        section('related_dreams', 'An earlier frozen lake.', ['D1']),
-        section('emotional_movement', '   '),
-        section('what_happened', 'A duplicate.'),
-        section('themes_and_readings', 'Uncertain destinations.', ['DESC'])]})
+        section('waking_life', 'The note from October 8 about the exam deadline mirrors the rush.', ['M1', 'DREAM']),
+        section('dream_replay', 'You run for a train [DESC].'),
+        section('emotional_undercurrent', 'Your breath catches.'),
+        section('related_dreams', 'An earlier frozen lake.', ['DREAM']),
+        section('dream_replay', 'A duplicate.'),
+        section('symbols', '- **Train:** A departure.\n- **Frozen lake:** Stillness.', ['DESC'])]})
     assert await tasks.run_once()
     assert (await analyze_task(dream_id))['status'] == 'completed'
     [output] = await stored(dream_id)
     content = output['content']
-    assert [s['kind'] for s in content['sections']] == ['what_happened', 'waking_life_connections', 'themes_and_readings', 'related_dreams', 'reflection_questions']
-    assert content['sections'][0] == {'kind': 'what_happened', 'text': 'You missed a train [DESC].', 'citations': ['DREAM', 'DESC']}
-    assert content['sections'][-1]['text'] == 'What did missing it mean?\nWho waved?'
-    assert (content['withheld'], content['removed_sources'], content['dream_date'], content['mood'], output['instruction_version'], output['status']) == (0, 0, '2026-10-10', 'anxious', 'analyze-1', 'current')
+    assert [s['kind'] for s in content['sections']] == ['dream_replay', 'emotional_undercurrent', 'symbols', 'waking_life']
+    assert content['sections'][0] == {'kind': 'dream_replay', 'text': 'You run for a train [DESC].', 'citations': ['DREAM', 'DESC']}
+    assert content['sections'][2]['text'] == '- **Train:** A departure.\n- **Frozen lake:** Stillness.'
+    assert (content['withheld'], content['removed_sources'], content['dream_date'], content['mood'], output['instruction_version'], output['status']) == (0, 0, '2026-10-10', 'anxious', 'analyze-2', 'current')
     rows = [tuple(row) for row in await db.rwdb.execute_fetchall('SELECT label,kind,source_id,source_revision,source_date,cut_to FROM sources WHERE output_id=? ORDER BY label', (output['id'],))]
-    assert rows == [('D1', 'dream', earlier, 1, '2026-09-30', None), ('DESC', 'output', desc, 1, None, None), ('M1', 'memory', memory_id, 1, '2026-10-08', None)]
+    assert rows == [('DESC', 'output', desc, 1, None, None), ('M1', 'memory', memory_id, 1, '2026-10-08', None)]
     call = gemini.calls[0]
-    assert call['temperature'] is None and call['name'] == 'analysis'
-    assert [line for line in call['content'].splitlines() if line.startswith('## ')] == ['## DREAM (2026-10-10)', '## DESC', '## M1 (2026-10-08)', '## D1 (2026-09-30)']
-    assert 'Mood: anxious' in call['content'] and 'Train title' not in call['content'] and 'About 120 words.' in call['content']
-    assert 'Labels that may be cited:\nDREAM, DESC, M1, D1' in call['content'] and 'waking_life_connections' in call['content'].split('Section kinds possible in this call:\n')[1]
+    assert call['temperature'] is None and call['name'] == 'analysis' and '## Dream Replay' not in call['instruction'] and 'dream_replay' in call['instruction']
+    assert call['content'].startswith('DREAM (label DREAM, 2026-10-10):\n<<<ACCOUNT ') and '\n\nSUMMARY AND TAGS (label DESC):\nSummary: A missed train.' in call['content']
+    assert 'LIFE NOTES (most recent first; may be empty):\n- M1 · 2026-10-08: Exam deadline at the station office.\n\n' in call['content'] and 'frozen lake.' not in call['content'].split('<<<ACCOUNT')[1].split('ACCOUNT')[1]
+    assert 'Mood: anxious' in call['content'] and 'Train title' not in call['content'] and 'Labels that may be cited:\nDREAM, DESC, M1' in call['content']
     markers = re.findall(r'<<<ACCOUNT ([0-9a-f]{8})', call['content'])
-    assert len(markers) == 2 and all(f'<<<ACCOUNT {marker}' in call['instruction'] for marker in markers) and not re.search(r'\[(?:DREAM|DESC|M\d|D\d)\]', call['content'])
+    assert len(markers) == 1 and f'<<<ACCOUNT {markers[0]}' in call['instruction'] and not re.search(r'\[(?:DREAM|DESC|M\d|D\d)\]', call['content'])
     body = (await client.get(f'/v1/dreams/{dream_id}/analysis', headers=headers)).json()
-    assert [entry['label'] for entry in body['analysis']['context']] == ['DREAM', 'D1', 'DESC', 'M1'] or [entry['label'] for entry in body['analysis']['context']] == ['DREAM', 'DESC', 'M1', 'D1']
+    assert [entry['label'] for entry in body['analysis']['context']] == ['DREAM', 'DESC', 'M1']
     assert all(entry['available'] for entry in body['analysis']['context']) and body['task']['status'] == 'completed' and body['analysis']['removed_sources'] == 0
     assert [entry['title'] for entry in body['analysis']['context'] if entry['kind'] == 'memory'] == ['Exam week']
     assert (await client.get('/v1/dreams', headers=headers)).json()['items'][0]['status'] == 'ready'
 
 
-async def test_impossible_kinds_are_dropped_and_missing_required_kinds_fail(client, clock, gemini):
+async def test_unknown_kinds_are_dropped_and_missing_kinds_fail(client, clock, gemini):
     _, user, dream_id = await journal(client)
     await organized(user, dream_id)
-    gemini.answers += [{'sections': [*BASE, section('waking_life_connections', 'No notes exist.', ['M1']), section('related_dreams', 'None.', ['D1'])]},
-                       {'sections': [section('what_happened')]}, {'sections': []}]
+    gemini.answers += [{'sections': [*BASE, section('reflection_questions', 'Why?')]}, {'sections': BASE[:3] + [section('waking_life', '  ')]}, {'sections': []}]
     assert await tasks.run_once()
     [output] = await stored(dream_id)
-    assert ([s['kind'] for s in output['content']['sections']], output['content']['withheld'], len(gemini.calls)) == (['what_happened', 'reflection_questions'], 0, 1)
-    assert 'waking_life_connections' not in gemini.calls[0]['content'].split('Section kinds possible in this call:\n')[1].split('\n')[0]
+    assert ([s['kind'] for s in output['content']['sections']], output['content']['withheld'], len(gemini.calls)) == (list(analysis.KINDS), 0, 1)
+    assert 'LIFE NOTES (most recent first; may be empty):\n\n' in gemini.calls[0]['content']
     _, other_user, other = await journal(client)
     await organized(other_user, other)
     assert await tasks.run_once()
@@ -214,27 +188,29 @@ async def test_impossible_kinds_are_dropped_and_missing_required_kinds_fail(clie
 async def test_repair_replaces_failed_references_or_withholds(client, clock, gemini, monkeypatch):
     headers, user, dream_id = await journal(client)
     await organized(user, dream_id)
-    await journal(client, text='A train at a frozen lake long ago.', headers=headers, dream_date='2026-09-01')
-    first = {'sections': [*BASE, section('related_dreams', 'Like an older dream.', ['D7']), section('themes_and_readings', 'See [M2].', ['DREAM'])]}
-    repaired = {'sections': [section('related_dreams', 'Like the earlier lake dream.', ['D1']), section('what_happened', 'Rewritten good section.'), section('themes_and_readings', 'Still [M3].', ['DREAM'])]}
+    clock['ms'] -= DAY
+    await note(client, headers, 'A train strike.', event_date='2026-10-09')
+    clock['ms'] += DAY
+    first = {'sections': [*BASE[:2], section('symbols', 'See [M2].', ['DREAM']), section('waking_life', 'Like the strike.', ['M7'])]}
+    repaired = {'sections': [section('waking_life', 'The October 9 strike mirrors it.', ['M1']), section('dream_replay', 'Rewritten good section.'), section('symbols', 'Still [M3].', ['DREAM'])]}
     gemini.answers += [first, repaired]
     assert await tasks.run_once()
     [output] = await stored(dream_id)
     by_kind = {s['kind']: s for s in output['content']['sections']}
-    assert by_kind['related_dreams']['citations'] == ['D1'] and by_kind['what_happened']['text'] == BASE[0]['text'] and 'themes_and_readings' not in by_kind
-    assert output['content']['withheld'] == 1 and gemini.calls[1]['temperature'] == 0 and 'related_dreams: D7' in gemini.calls[1]['content'] and 'themes_and_readings: M2' in gemini.calls[1]['content']
+    assert by_kind['waking_life']['citations'] == ['M1'] and by_kind['dream_replay']['text'] == BASE[0]['text'] and 'symbols' not in by_kind
+    assert output['content']['withheld'] == 1 and gemini.calls[1]['temperature'] == 0 and 'waking_life: M7' in gemini.calls[1]['content'] and 'symbols: M2' in gemini.calls[1]['content']
     assert (await db.rwdb.execute_fetchall("SELECT count FROM usage WHERE user_id=?", (user,)))[0][0] == 2
     _, user, dream_id = await journal(client)
     await organized(user, dream_id)
-    gemini.answers += [{'sections': [*BASE, section('emotional_movement', 'Rests on [NOTES].')]}, providers.ProviderError('provider_refused', False)]
+    gemini.answers += [{'sections': [*BASE[:3], section('waking_life', 'Rests on [NOTES].')]}, providers.ProviderError('provider_refused', False)]
     assert await tasks.run_once()
     [output] = await stored(dream_id)
-    assert ([s['kind'] for s in output['content']['sections']], output['content']['withheld']) == (['what_happened', 'reflection_questions'], 1)
+    assert ([s['kind'] for s in output['content']['sections']], output['content']['withheld']) == (['dream_replay', 'emotional_undercurrent', 'symbols'], 1)
     monkeypatch.setitem(config.CAPS, 'text', 1)
     _, user, dream_id = await journal(client)
     await organized(user, dream_id)
     calls = len(gemini.calls)
-    gemini.answers.append({'sections': [*BASE, section('threat_and_response', 'Cites [X1] and [D4].', ['D4'])]})
+    gemini.answers.append({'sections': [*BASE[:3], section('waking_life', 'Cites [X1] and [D4].', ['D4'])]})
     assert await tasks.run_once()
     [output] = await stored(dream_id)
     assert output['content']['withheld'] == 1 and len(gemini.calls) == calls + 1
@@ -344,13 +320,13 @@ async def test_memory_exclusion_deletion_and_edit_invalidate_analyses(client, cl
     clock['ms'] -= DAY
     memory_id = await note(client, headers, 'A train strike at the lake.', event_date='2026-10-09')
     clock['ms'] += DAY
-    reading = [*BASE, section('waking_life_connections', 'The strike may echo this.', ['M1'])]
+    reading = [*BASE[:3], section('waking_life', 'The October 9 strike mirrors this.', ['M1'])]
     gemini.answers += [{'sections': reading}, {'sections': reading}]
     assert await tasks.run_once() and await tasks.run_once()
     url = f'/v1/dreams/{dream_id}/analysis'
     await client.put(f'/v1/memories/{memory_id}', headers=headers, json={'base_revision': 1, 'text': 'A train strike at the lake.', 'allow_analysis': False})
     excluded = (await client.get(url, headers=headers)).json()['analysis']
-    assert excluded['status'] == 'outdated' and [s['kind'] for s in excluded['sections']] == ['what_happened', 'reflection_questions']
+    assert excluded['status'] == 'outdated' and [s['kind'] for s in excluded['sections']] == ['dream_replay', 'emotional_undercurrent', 'symbols']
     assert 'M1' not in [entry['label'] for entry in excluded['context']] and excluded['removed_sources'] == 1
     assert len(await db.rwdb.execute_fetchall("SELECT 1 FROM sources WHERE kind='memory' AND source_id=?", (memory_id,))) == 2
     assert (await client.delete(f'/v1/memories/{memory_id}', headers=headers)).status_code == 204
@@ -367,26 +343,12 @@ async def test_memory_exclusion_deletion_and_edit_invalidate_analyses(client, cl
     assert await tasks.run_once()
     await client.put(f'/v1/memories/{edited}', headers=headers, json={'base_revision': 1, 'text': 'The lake thawed.'})
     after_edit = (await client.get(f'/v1/dreams/{third}/analysis', headers=headers)).json()['analysis']
-    assert after_edit['status'] == 'outdated' and len(after_edit['sections']) == 3
+    assert after_edit['status'] == 'outdated' and len(after_edit['sections']) == 4
     assert [entry['available'] for entry in after_edit['context'] if entry['kind'] == 'memory'] == [False]
 
 
-async def test_earlier_dream_exclusion_deletion_and_date_or_mood_changes(client, clock, gemini):
-    headers, user, earlier = await journal(client, text='A train crossed the frozen lake.', dream_date='2026-10-01')
-    await organized(user, earlier)
-    _, _, dream_id = await journal(client, headers=headers)
-    await organized(user, dream_id)
-    gemini.answers += [{'sections': BASE}, {'sections': [*BASE, section('related_dreams', 'Like before.', ['D1'])]}]
-    assert await tasks.run_once() and await tasks.run_once()
-    url = f'/v1/dreams/{dream_id}/analysis'
-    await client.put(f'/v1/dreams/{earlier}', headers=headers, json={'base_revision': 1, 'text': 'A train crossed the frozen lake.', 'dream_date': '2026-10-02', 'title': 'Train title'})
-    assert (await client.get(url, headers=headers)).json()['analysis']['status'] == 'outdated'
-    await client.put(f'/v1/dreams/{earlier}/permissions', headers=headers, json={'history': False})
-    hidden = (await client.get(url, headers=headers)).json()['analysis']
-    assert 'related_dreams' not in [s['kind'] for s in hidden['sections']] and hidden['removed_sources'] == 1
-    await client.delete(f'/v1/dreams/{earlier}', headers=headers)
-    gone = (await client.get(url, headers=headers)).json()['analysis']
-    assert (gone['sections'], gone['removed_sources']) == ([], 1)
+async def test_date_or_mood_changes_outdate_the_analysis(client, clock, gemini):
+    headers = credential()
     _, user, own = await journal(client, headers=headers, mood='calm')
     await organized(user, own)
     gemini.answers.append({'sections': BASE})

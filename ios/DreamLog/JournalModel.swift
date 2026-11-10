@@ -20,18 +20,18 @@ final class JournalModel {
     func load(_ app: AppModel, more: Bool = false) async {
         guard app.noticeSeen, !app.deleting, !isLoading, let client = app.client else { return }
         isLoading = true
-        defer { isLoading = false }
         let epoch = app.journalEpoch
-        if !more { await sendQueued(app) }
-        guard epoch == app.journalEpoch, !app.deleting else { return }
-        async let local = app.store.drafts()
-        let result = await client.loadJournal(filter: filter, offset: more ? items.count : 0)
-        let localResult = await local
-        guard epoch == app.journalEpoch, !app.deleting else { return }
-        switch localResult {
+        // Paint local drafts before the network round-trip so returning to Journal is not a blank wait.
+        switch await app.store.drafts() {
         case let .success(value): drafts = value
-        case .failure: error = "Could not read your local drafts. Unlock the phone and try again."; return
+        case .failure:
+            error = "Could not read your local drafts. Unlock the phone and try again."
+            isLoading = false
+            return
         }
+        guard epoch == app.journalEpoch, !app.deleting else { isLoading = false; return }
+        let result = await client.loadJournal(filter: filter, offset: more ? items.count : 0)
+        guard epoch == app.journalEpoch, !app.deleting else { isLoading = false; return }
         switch result {
         case let .success(page):
             let existing = Set(items.map(\.id))
@@ -41,11 +41,17 @@ final class JournalModel {
             if !more { items = [] }
             hasMore = false; error = failure.message
         }
+        isLoading = false
+        // Story map v2 still resends waiting drafts on every journal load, including when the connection returns.
+        // The list is shown first; queued uploads must not delay browsing, then one refresh picks up what was sent.
+        if !more, await sendQueued(app), epoch == app.journalEpoch, !app.deleting {
+            await load(app)
+        }
     }
-    // Story map v2 Skeletal card "Sync queued dreams when the connection returns": every journal load, including the one after
-    // the connection comes back, sends the drafts that wait for the server through the dream's own save logic, one at a time.
-    private func sendQueued(_ app: AppModel) async {
-        guard case let .success(stored) = await app.store.drafts() else { return }
+    // Each waiting draft uses the dream's own save logic, one at a time. Returns whether any draft reached the server.
+    private func sendQueued(_ app: AppModel) async -> Bool {
+        guard case let .success(stored) = await app.store.drafts() else { return false }
+        var sent = false
         for draft in stored where draft.unsent && !draft.conflict && !app.editing.contains(draft.dreamId) {
             let dream = DreamModel(id: draft.dreamId)
             await dream.load(app)
@@ -53,6 +59,8 @@ final class JournalModel {
             await dream.save(app)
             // A draft that is still unsent means the server is out of reach; the others wait for the next load.
             if dream.draft?.unsent == true { break }
+            sent = true
         }
+        return sent
     }
 }

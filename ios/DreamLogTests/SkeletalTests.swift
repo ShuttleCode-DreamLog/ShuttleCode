@@ -63,20 +63,21 @@ extension FoundationTests {
 
         let analysis = Data("""
         {"analysis": {"id": "c2d4", "status": "outdated", "dream_revision": 2,
-          "sections": [{"kind": "waking_life_connections", "text": "The deadline [M1] may echo the rush.", "citations": ["DREAM", "M1"]},
+          "sections": [{"kind": "waking_life", "text": "The deadline [M1] mirrors the rush.", "citations": ["DREAM", "M1"]},
                        {"kind": "new_kind", "text": "Something else.", "citations": ["D9"]}],
           "withheld": 1,
           "context": [{"label": "DREAM", "kind": "dream", "source_id": "9f1e", "source_revision": 2, "source_date": "2026-10-15", "available": true, "cut_to": null},
                       {"label": "DESC", "kind": "output", "source_id": "o1", "source_revision": 1, "source_date": null, "available": false, "cut_to": null},
                       {"label": "M1", "kind": "memory", "source_id": "77aa", "source_revision": 1, "source_date": "2026-10-13", "available": true, "cut_to": 200, "title": "Exam week"}],
-          "removed_sources": 1, "dream_date": "2026-10-15", "mood": null, "model": "test-model", "instruction_version": "analyze-1", "created_at": 1760371200000},
+          "removed_sources": 1, "dream_date": "2026-10-15", "mood": null, "model": "test-model", "instruction_version": "analyze-2", "created_at": 1760371200000},
          "task": null}
         """.utf8)
         let read = try serverDecoder().decode(AnalysisResponse.self, from: analysis)
         let result = try #require(read.analysis)
         let note = "Exam week · \(displayDate("2026-10-13"))"
         #expect(result.context.map(\.name) == ["This dream", "This dream's summary and tags", note])
-        #expect(result.text(of: result.sections[0]) == "The deadline \(note) may echo the rush.")
+        #expect(result.sections[0].kind == .wakingLife && result.sections[0].kind.heading == "Waking Life")
+        #expect(result.text(of: result.sections[0]) == "The deadline \(note) mirrors the rush.")
         #expect(result.sources(of: result.sections[0]) == ["This dream", note])
         #expect(result.sections[1].kind == .unknown && result.sources(of: result.sections[1]) == ["A source that has since changed"])
 
@@ -105,18 +106,19 @@ extension FoundationTests {
         enqueue([(500, failure), (500, failure)])
         let journal = JournalModel()
         await journal.load(app)
-        #expect(BackendProtocol.state.withLock { $0.requests.map(\.httpMethod) } == ["PUT", "GET"])
+        #expect(BackendProtocol.state.withLock { $0.requests.map(\.httpMethod) } == ["GET", "PUT"])
         #expect(journal.rows.count == 2 && journal.rows.allSatisfy { $0.status == .unsentDraft })
 
         BackendProtocol.state.withLock { $0.requests = [] }
         let items = [first, second].map { "{\"id\":\"\($0.dreamId)\",\"dream_date\":\"\($0.dreamDate)\",\"title\":null,\"mood\":null,\"revision\":1,\"audio_status\":\"none\",\"preview\":\"\($0.text)\",\"summary\":null,\"status\":\"processing\",\"favorite_visual_id\":null,\"updated_at\":1}" }
-        enqueue([(404, Data("{\"error\":\"not_found\",\"message\":\"Not found\"}".utf8)), (201, try dreamResponse(journalDream(id: first.dreamId, text: first.text))),
+        enqueue([(200, Data("{\"items\":[],\"has_more\":false}".utf8)), (404, Data("{\"error\":\"not_found\",\"message\":\"Not found\"}".utf8)),
+                 (201, try dreamResponse(journalDream(id: first.dreamId, text: first.text))),
                  (201, try dreamResponse(journalDream(id: second.dreamId, text: second.text))), (200, Data("{\"items\":[\(items.joined(separator: ","))],\"has_more\":false}".utf8))])
         await journal.load(app)
         let requests = BackendProtocol.state.withLock { $0.requests }
-        // The uncertain first save is read before it is sent again (wiki 4.5.8, "An unconfirmed draft").
-        #expect(requests.map(\.httpMethod) == ["GET", "PUT", "PUT", "GET"])
-        #expect(requests[1].url?.lastPathComponent == first.dreamId && requests[2].url?.lastPathComponent == second.dreamId)
+        // The list is read first. The uncertain first save is then read before it is sent again (wiki 4.5.8, "An unconfirmed draft").
+        #expect(requests.map(\.httpMethod) == ["GET", "GET", "PUT", "PUT", "GET"])
+        #expect(requests[2].url?.lastPathComponent == first.dreamId && requests[3].url?.lastPathComponent == second.dreamId)
         #expect(try await app.store.drafts().get().isEmpty)
         #expect(journal.rows.map(\.status) == [.processing, .processing] && journal.error == nil)
         await closeJournalApp(app)

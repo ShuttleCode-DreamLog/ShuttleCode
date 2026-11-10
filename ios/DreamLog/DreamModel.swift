@@ -16,6 +16,7 @@ final class DreamModel {
     private let newEntry: Bool
     private var epoch: Int?
     private var writing: Task<Result<Void, StoreError>, Never>?
+    private static let persistDelay: Duration = .milliseconds(250)
     // Text from a discussion message (Add to dream, wiki 4.6.6, rule 2); it joins the draft once that is known, so unsent text is kept.
     private var appending: String?
 
@@ -23,10 +24,16 @@ final class DreamModel {
     private func current(_ app: AppModel) -> Bool { epoch == app.journalEpoch && !app.deleting && app.noticeSeen }
     private func persist(_ value: Draft, app: AppModel) async -> Bool {
         guard current(app) else { return false }
-        switch await app.store.saveDraft(value) {
+        switch await writeDraft(value, app: app) {
         case .success: return true
-        case .failure: error = "Could not save this draft on the phone. Unlock the phone and try again."; return false
+        case .failure: return false
         }
+    }
+    private func writeDraft(_ value: Draft, app: AppModel) async -> Result<Void, StoreError> {
+        guard current(app) else { return .failure(.filesFailed) }
+        let result = await app.store.saveDraft(value)
+        if case .failure = result { error = "Could not save this draft on the phone. Unlock the phone and try again." }
+        return result
     }
     func change(_ app: AppModel, edit: (inout Draft) -> Void) {
         guard var value = draft, !isSending, current(app) else { return }
@@ -35,17 +42,19 @@ final class DreamModel {
         draft = value
         let previous = writing
         writing = Task {
+            previous?.cancel()
             _ = await previous?.value
-            guard self.current(app) else { return .failure(.filesFailed) }
-            let result = await app.store.saveDraft(value)
-            if case .failure = result { self.error = "Could not save this draft on the phone. Unlock the phone and try again." }
-            return result
+            do { try await Task.sleep(for: Self.persistDelay) } catch { return .success(()) }
+            guard !Task.isCancelled, self.current(app), let latest = self.draft else { return .success(()) }
+            return await self.writeDraft(latest, app: app)
         }
     }
-    private func flush() async -> Bool {
-        guard let writing else { return true }
-        if case .success = await writing.value { return true }
-        return false
+    private func flush(_ app: AppModel) async -> Bool {
+        writing?.cancel()
+        _ = await writing?.value
+        writing = nil
+        guard let value = draft else { return true }
+        return await persist(value, app: app)
     }
     func load(_ app: AppModel) async {
         guard !isLoading, app.noticeSeen, !app.deleting, let client = app.client else { return }
@@ -60,7 +69,7 @@ final class DreamModel {
                 change(app) { $0.text = $0.text.isEmpty ? added : $0.text + "\n\n" + added }
             }
         }
-        guard await flush(), current(app) else { return }
+        guard await flush(app), current(app) else { return }
         switch await app.store.draft(id) {
         case let .success(value): if let value { draft = value; isEditing = value.unsent }
         case .failure: error = "Could not read this draft. Unlock the phone and try again."; return
@@ -136,7 +145,7 @@ final class DreamModel {
         guard !isSending, let client = app.client, current(app) else { return }
         isSending = true
         defer { isSending = false }
-        guard await flush() else { return }
+        guard await flush(app) else { return }
         if draft?.unconfirmed == true {
             switch await client.loadDream(id) {
             case let .success(value):
@@ -191,20 +200,20 @@ final class DreamModel {
         await save(app)
     }
     func discardChanges(_ app: AppModel) async {
-        guard await flush(), current(app), let dream else { return }
+        guard await flush(app), current(app), let dream else { return }
         if case .success = await app.store.deleteDraft(id) {
             draft = Draft(dream: dream); isEditing = false; error = nil; conflictReloaded = false
         } else { error = "Could not discard the local changes. Try again." }
     }
     func revert(_ app: AppModel) async {
-        guard !isSending, await flush(), current(app) else { return }
+        guard !isSending, await flush(app), current(app) else { return }
         guard draft?.unconfirmed != true else { error = "Check the stored entry before reverting an unconfirmed save."; await load(app); return }
         if dream != nil { await discardChanges(app); return }
         guard case .success = await app.store.deleteDraft(id) else { error = "Could not revert the local draft."; return }
         draft = Draft(dreamId: id, dreamDate: journalDate()); error = nil
     }
     func saveAsNew(_ app: AppModel) async {
-        guard await flush(), var kept = draft, current(app) else { return }
+        guard await flush(app), var kept = draft, current(app) else { return }
         let oldID = id
         kept.dreamId = newID(); kept.baseRevision = 0; kept.source = .text
         kept.conflict = false; kept.unconfirmed = false; kept.sentText = nil
@@ -217,7 +226,7 @@ final class DreamModel {
         guard !isSending, current(app), let client = app.client else { return }
         isSending = true
         defer { isSending = false }
-        guard await flush() else { return }
+        guard await flush(app) else { return }
         let localOnly = dream == nil && draft?.baseRevision == 0 && draft?.unconfirmed == false
         if !localOnly {
             let result = await client.deleteDream(id)
@@ -264,7 +273,7 @@ final class DreamModel {
         }
     }
     @discardableResult func close(_ app: AppModel) async -> Bool {
-        guard !deleted, !isSending, await flush(), current(app), let draft else { return deleted }
+        guard !deleted, !isSending, await flush(app), current(app), let draft else { return deleted }
         if draft.baseRevision == 0 && !draft.unconfirmed && draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if case .success = await app.store.deleteDraft(id) { return true }
             error = "Could not remove the empty draft."; return false

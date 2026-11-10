@@ -120,7 +120,7 @@ Implemented on the server; see [API.md](API.md#analysis). The app shows the anal
 ```json
 "analysis": {
   "id": "c2d4…", "status": "current", "dream_revision": 2,
-  "sections": [{"kind": "waking_life_connections", "text": "…", "citations": ["DREAM", "M1"]}],
+  "sections": [{"kind": "waking_life", "text": "…", "citations": ["DREAM", "M1"]}],
   "withheld": 0,
   "context": [
     {"label": "DREAM", "kind": "dream", "source_id": "9f1e…", "source_revision": 2, "source_date": "2026-10-12", "available": true, "cut_to": null},
@@ -134,7 +134,7 @@ Implemented on the server; see [API.md](API.md#analysis). The app shows the anal
 
 | Field | Values |
 | --- | --- |
-| `sections[].kind` | `what_happened`, `emotional_movement`, `waking_life_connections`, `themes_and_readings`, `threat_and_response`, `related_dreams`, `reflection_questions` |
+| `sections[].kind` | `dream_replay`, `emotional_undercurrent`, `symbols`, `waking_life` (`analyze-1` outputs carry the earlier seven kinds, shown as "Reflection") |
 | `context[].label` | `DREAM`, `DESC`, `ANALYSIS`, `NOTES`, or `M`/`D` followed by digits (a memory or another dream) |
 | `context[].kind` | `dream`, `memory`, `output`, `notes` |
 | `removed_sources` | Supplied sources deleted since, or excluded now; they have no `context` entry |
