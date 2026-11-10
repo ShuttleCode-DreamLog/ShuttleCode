@@ -29,6 +29,7 @@ extension FoundationTests {
         let model = DreamModel(id: id, newEntry: true)
         await model.load(app)
         model.change(app) { $0.text = "An invented dream." }
+        #expect(try await app.store.draft(id).get()?.text == "")
         enqueue([(201, try dreamResponse(journalDream(id: id)))])
         #expect(await model.close(app))
         #expect(model.draft?.unsent == false)
