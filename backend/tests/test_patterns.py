@@ -718,6 +718,10 @@ async def test_search_narrows_by_every_tag_then_ranks_by_meaning(client, clock, 
     # The lake dream by meaning first, then the dream that only carries the words and has no vector; the train dream is too far.
     assert found['ranked'] and [(item['id'], item['similarity'] is not None) for item in found['items']] == [(lake, True), (spoken, False)]
     assert found['items'][0]['similarity'] > 0.5
+    first = (await client.post('/v1/dreams/search?limit=1', headers=headers, json={'query': 'quiet lake'})).json()
+    second = (await client.post('/v1/dreams/search?limit=1&offset=1', headers=headers, json={'query': 'quiet lake'})).json()
+    assert first['has_more'] and [item['id'] for item in first['items']] == [lake] and first['items'][0]['preview']
+    assert not second['has_more'] and [item['id'] for item in second['items']] == [spoken] and second['items'][0]['preview']
     assert [i['id'] for i in (await client.post('/v1/dreams/search', headers=headers, json={'tags': ['lake']})).json()['items']] == [lake]
     assert (await client.post('/v1/dreams/search', headers=headers, json={'tags': ['lake', 'train']})).json()['items'] == []
     assert [i['id'] for i in (await client.post('/v1/dreams/search', headers=headers, json={'query': 'quiet lake', 'tags': ['LAKE ']})).json()['items']] == [lake]

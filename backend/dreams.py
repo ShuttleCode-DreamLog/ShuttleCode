@@ -119,6 +119,17 @@ def journal_item(row, status, summary, tags, similarity=None):
     return {**{key: row[key] for key in ('id', 'dream_date', 'title', 'mood', 'revision', 'audio_status', 'updated_at')}, 'preview': row['text'][:200], 'summary': summary, 'tags': tags, 'similarity': similarity, 'status': status, 'favorite_visual_id': None}
 
 
+# List cards need these columns; ranked search loads them only for the page, not for every dream.
+JOURNAL_ITEM_COLUMNS = 'd.id,d.dream_date,d.title,d.mood,d.revision,d.audio_status,d.updated_at,d.text'
+
+
+async def rows_for_ids(ids):
+    if not ids:
+        return []
+    found = {row['id']: row for row in await db.rwdb.execute_fetchall(f'SELECT {JOURNAL_ITEM_COLUMNS} FROM dreams d WHERE d.id IN ({",".join("?" * len(ids))})', ids)}
+    return [found[dream_id] for dream_id in ids if dream_id in found]
+
+
 async def list_tags(request):
     identity = await resolve_user(request)
     async with db.tx() as connection:
@@ -334,18 +345,20 @@ async def page(request, identity, filters):
     for tag in [*filters.tags, *([filters.tag] if filters.tag is not None else [])]:
         clauses.append("EXISTS(SELECT 1 FROM visible_user_tags dt JOIN user_tags ut ON ut.id=dt.tag_id WHERE dt.dream_id=d.id AND dt.user_id=d.user_id AND ut.label_key=?)")
         values.append(' '.join(tag.casefold().split()))
-    order = f"SELECT d.* FROM dreams d WHERE {' AND '.join(clauses)} ORDER BY d.dream_date DESC,d.created_at DESC,d.id ASC"
+    where = f"FROM dreams d WHERE {' AND '.join(clauses)}"
     if ranked is None:
-        rows = await db.rwdb.execute_fetchall(f'{order} LIMIT ? OFFSET ?', (*values, limit + 1, offset))
+        rows = await db.rwdb.execute_fetchall(f'SELECT d.* {where} ORDER BY d.dream_date DESC,d.created_at DESC,d.id ASC LIMIT ? OFFSET ?', (*values, limit + 1, offset))
         page_rows, more, distances = rows[:limit], len(rows) > limit, {}
     else:
         # The narrowed dreams in order of meaning: close enough by vector, or carrying the words literally when no vector can say.
+        # Only id and the match fields are read for every dream; preview, summary and tags come from the page.
         words = query.lower()
-        rows = [row for row in await db.rwdb.execute_fetchall(order, values)
-                if ranked.get(row['id'], 2.0) <= config.SEARCH_MAX_DISTANCE or words in row['text'].lower() or words in (row['title'] or '').lower()]
-        rows.sort(key=lambda row: ranked.get(row['id'], 1.0))
-        page_rows, more = rows[offset:offset + limit], len(rows) > offset + limit
-        distances = {row['id']: ranked[row['id']] for row in page_rows if row['id'] in ranked}
+        ranked_rows = [row for row in await db.rwdb.execute_fetchall(f'SELECT d.id,d.title,d.text {where}', values)
+                       if ranked.get(row['id'], 2.0) <= config.SEARCH_MAX_DISTANCE or words in row['text'].lower() or words in (row['title'] or '').lower()]
+        ranked_rows.sort(key=lambda row: ranked.get(row['id'], 1.0))
+        page_ids = [row['id'] for row in ranked_rows[offset:offset + limit]]
+        more, distances = len(ranked_rows) > offset + limit, {dream_id: ranked[dream_id] for dream_id in page_ids if dream_id in ranked}
+        page_rows = await rows_for_ids(page_ids)
     statuses, found, tags = await tasks.journal_statuses(identity, page_rows), await summaries(identity, page_rows), await tag_lists(identity, page_rows)
     items = [journal_item(row, statuses[row['id']], found.get(row['id']), tags.get(row['id'], []), round(1 - distances[row['id']], 3) if row['id'] in distances else None) for row in page_rows]
     return json_response({'items': items, 'has_more': more, 'ranked': ranked is not None})
