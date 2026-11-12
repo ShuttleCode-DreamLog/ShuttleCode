@@ -44,13 +44,7 @@ struct JournalView: View {
             .task { await model.load(app) }
             // A dream whose title, summary and tags are still being made shows them by itself, as Dream Detail does (wiki
             // 4.4.6, rule 3); the wait ends with the work, the tab, or a page pushed over the list, which waits on its own.
-            .task(id: awaitingWork) {
-                var pause = 2
-                while awaitingWork, (try? await Task.sleep(for: .seconds(pause))) != nil {
-                    await model.load(app)
-                    pause = min(pause * 2, 15)
-                }
-            }
+            .readsAgain(while: awaitingWork, client: app.client) { await model.load(app) }
             .onChange(of: query) { _, value in
                 if value.isEmpty && !model.filter.query.isEmpty { model.filter.query = ""; Task { await model.load(app) } }
             }

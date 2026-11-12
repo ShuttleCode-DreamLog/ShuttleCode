@@ -127,6 +127,7 @@ routes.extend([
     Route("/v1/patterns/groups", patterns.create_group, methods=["POST"]),
     Route("/v1/patterns/groups/{group_id}", patterns.delete_group, methods=["DELETE"]),
     Route("/v1/patterns/groups/{group_id}/dreams", patterns.add_dream, methods=["POST"]),
+    Route("/v1/tasks/changes", tasks.task_changes, methods=["GET"]),
     Route("/v1/tasks/{task_id}/retry", tasks.retry_task, methods=["POST"]),
 ])
 if os.environ.get("DREAMLOG_FAULTS") == "1":

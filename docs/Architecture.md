@@ -25,7 +25,7 @@ flowchart LR
 | Notes | `NotesView`, `NoteEditorView`, `NotesModel`, `NoteEditorModel` | `/v1/memories` (with `title`), `memories.py` (routes and the `title_note` handler), `photos.py` | `memories` (`title` since version 6, `title_generated` since version 10), `memory_photos`; unsent editor state in memory |
 | Profile | `ProfileSettings`, `ProfileModel` | `/v1/me/profile`, `profiles.py` | `profiles.fields_json` |
 | Settings and deletion | `Settings` (the Settings tab), `AppModel` (tab, `newDream` and `newNote` for the bar's +, `refreshes` on foreground, reconnection or editor close) | `/v1/me`, `records.py` | `users`; delete cascades profiles, notes and journals |
-| AI tasks | `TaskInfo` in `JournalModels.swift`, `failureText` (wiki 4.4.6 wording) in `AIModels.swift` | `/v1/tasks/{id}/retry`, `tasks.py` (worker), `records.py` (`charge`), `providers.py` | `tasks`, `usage` |
+| AI tasks | `TaskInfo` in `JournalModels.swift`, `failureText` (wiki 4.4.6 wording) in `AIModels.swift` | `/v1/tasks/{id}/retry`, `/v1/tasks/changes`, `tasks.py` (worker, change streams), `records.py` (`charge`), `providers.py` | `tasks`, `usage` |
 | Shared infrastructure | `Identity`, `APIClient`, `PrivacyNotice`, `LocalStore` | `main.py`, `web.py`, `db.py`, `config.py` | Device-only Keychain, database schema |
 
 All Swift files above are in `ios/DreamLog/`; backend files are in `backend/`. Routes are listed in `backend/main.py`. Read [API.md](API.md) for callable contracts and [LocalDevelopment.md](LocalDevelopment.md) to run them.

@@ -5,6 +5,7 @@ import traceback
 from typing import NamedTuple
 from uuid import uuid4
 
+from sse_starlette import EventSourceResponse
 import config
 import db
 import providers
@@ -15,6 +16,9 @@ logger = logging.getLogger("dreamlog")
 # Component modules add their handlers here when imported; a type without a handler is never claimed (wiki 4.1, rule 6).
 handlers = {}
 wake = asyncio.Event()
+# Each user's open change streams; a settled task wakes them, so a screen showing server work reads again when that work
+# changes instead of asking on a clock (wiki 4.4.6, rule 3).
+listeners = {}
 fault = None
 KINDS = {"generate_image": "image", "generate_video": "video"}
 LIMIT_MESSAGES = {"cap_reached": "Today's limit for this kind of generation is used up.", "ceiling_reached": "DreamLog has reached today's limit for everyone."}
@@ -128,6 +132,8 @@ async def run_once():
         log_error(task["id"], error)
         outcome = Failed("internal", True)
     await settle(task, outcome)
+    for changed in listeners.get(task["user_id"], ()):
+        changed.set()
     rows = await db.rwdb.execute_fetchall("SELECT status,error_code FROM tasks WHERE id=?", (task["id"],))
     status, code = (rows[0]["status"], rows[0]["error_code"]) if rows else ("deleted", None)
     logger.info("task_id=%s type=%s attempt=%s status=%s error=%s duration_ms=%d", task["id"], task["type"], task["attempts"], status, code, (time.monotonic() - started) * 1000)
@@ -175,6 +181,26 @@ async def retry_task(request):
         task = (await connection.execute_fetchall("SELECT * FROM tasks WHERE id=?", (task_id,)))[0]
     wake.set()
     return json_response({"task": task_value(task)})
+
+
+async def task_changes(request):
+    identity = await resolve_user(request)
+
+    async def stream():
+        changed = asyncio.Event()
+        listeners.setdefault(identity, set()).add(changed)
+        try:
+            while True:
+                # The first event follows registration, so work that settles while the screen reads after it is still announced.
+                yield {"event": "changed", "data": "{}"}
+                await changed.wait()
+                changed.clear()
+        finally:
+            listeners[identity].discard(changed)
+            if not listeners[identity]:
+                del listeners[identity]
+
+    return EventSourceResponse(stream())
 
 
 async def dream_tasks(identity, dream_id, revision):

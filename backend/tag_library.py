@@ -61,8 +61,8 @@ async def set_dream_tags(connection, identity, dream_id, ids):
         if not await connection.execute_fetchall('SELECT 1 FROM user_tags WHERE id=? AND user_id=?', (tag_id, identity)):
             raise RequestError(404, 'not_found', 'A selected tag is no longer available. Open Add tag to update your selection.')
     await connection.execute('UPDATE imported_tag_links SET selected=0 WHERE user_id=? AND source_id IN (SELECT id FROM tags WHERE dream_id=?)', (identity, dream_id))
-    await connection.execute('DELETE FROM dream_user_tags WHERE dream_id=? AND user_id=?', (dream_id, identity))
-    await connection.executemany('INSERT INTO dream_user_tags(dream_id,tag_id,user_id) VALUES(?,?,?)', [(dream_id, tag_id, identity) for tag_id in ids])
+    await connection.execute('DELETE FROM dream_user_tags WHERE dream_id=? AND user_id=? AND tag_id NOT IN (SELECT value FROM json_each(?))', (dream_id, identity, msgspec.json.encode(ids).decode()))
+    await connection.executemany('INSERT INTO dream_user_tags(dream_id,tag_id,user_id) VALUES(?,?,?) ON CONFLICT(dream_id,tag_id) DO NOTHING', [(dream_id, tag_id, identity) for tag_id in ids])
 
 
 async def list_library(request):

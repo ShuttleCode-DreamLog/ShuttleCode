@@ -36,13 +36,7 @@ struct NotesView: View {
             .navigationDestination(for: String.self) { NoteEditorView(id: $0) }
             .task { await model.load(app) }
             // A note left untitled shows the title the server writes by itself, as Journal cards do (wiki 4.4.6, rule 3).
-            .task(id: awaitingTitles) {
-                var pause = 2
-                while awaitingTitles, (try? await Task.sleep(for: .seconds(pause))) != nil {
-                    await model.load(app)
-                    pause = min(pause * 2, 15)
-                }
-            }
+            .readsAgain(while: awaitingTitles, client: app.client) { await model.load(app) }
             .reloadable { await model.load(app) }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await model.load(app) } } }
             .onChange(of: app.refreshes) { Task { await model.load(app) } }
@@ -176,13 +170,7 @@ struct NoteEditorView: View {
         .sheet(isPresented: $editing, onDismiss: reload) {
             if let stored = model.stored { NavigationStack { NoteEditorView(editing: stored, photos: model.photoContent, epoch: app.journalEpoch) } }
         }
-        .task(id: awaitingTitle) {
-            var pause = 2
-            while awaitingTitle, (try? await Task.sleep(for: .seconds(pause))) != nil {
-                await model.load(app)
-                pause = min(pause * 2, 15)
-            }
-        }
+        .readsAgain(while: awaitingTitle, client: app.client) { await model.load(app) }
         .interactiveDismissDisabled(model.hasChanges || model.isSending || model.isAddingPhotos)
         .onChange(of: selectedPhotos) { _, items in
             if !items.isEmpty { Task { await model.addPhotos(items, app: app); selectedPhotos = [] } }

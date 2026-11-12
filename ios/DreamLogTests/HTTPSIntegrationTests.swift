@@ -3,7 +3,7 @@ import Testing
 import UIKit
 @testable import DreamLog
 
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["DREAMLOG_HTTPS_SMOKE"] == "1")) @MainActor
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["DREAMLOG_HTTPS_SMOKE"] == "1"))
 struct HTTPSIntegrationTests {
     @Test func localAppLifecycleOverRealHTTPS() async throws {
         let namespace = "https-integration-\(newID())"

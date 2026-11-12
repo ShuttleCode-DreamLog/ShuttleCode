@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-@MainActor @Observable
+@Observable
 final class DreamModel {
     var id: String
     var dream: Dream?
@@ -16,7 +16,6 @@ final class DreamModel {
     private let newEntry: Bool
     private var epoch: Int?
     private var writing: Task<Result<Void, StoreError>, Never>?
-    private static let persistDelay: Duration = .milliseconds(250)
     // Text from a discussion message (Add to dream, wiki 4.6.6, rule 2); it joins the draft once that is known, so unsent text is kept.
     private var appending: String?
 
@@ -41,10 +40,10 @@ final class DreamModel {
         value.unsent = true; value.updatedAt = .now
         draft = value
         let previous = writing
+        // Each change cancels the write before it, so keystrokes that arrive while one write runs collapse into the next write.
         writing = Task {
             previous?.cancel()
             _ = await previous?.value
-            do { try await Task.sleep(for: Self.persistDelay) } catch { return .success(()) }
             guard !Task.isCancelled, self.current(app), let latest = self.draft else { return .success(()) }
             return await self.writeDraft(latest, app: app)
         }

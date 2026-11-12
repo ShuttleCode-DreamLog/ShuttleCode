@@ -121,7 +121,7 @@ Task object, as it appears in `dream.tasks`:
 
 Journal items' `status` is `attention` when the newest `transcribe`, `organize` or `analyze` task of the present revision failed (a `provider_refused` organization or analysis leaves no mark), otherwise `processing` while one is `waiting` or `running`, otherwise `ready`.
 
-There is no push and no list of tasks: the app reads them with the record, when a screen opens, the app returns to the foreground, or the user pulls to refresh.
+There is no list of tasks: the app reads them with the record, when a screen opens, the app returns to the foreground, or the user pulls to refresh. While a screen shows work in progress it also holds `GET /v1/tasks/changes` open (12 November 2026): a server-sent event stream that sends `changed` with data `{}` once when it opens and again each time one of this user's tasks settles, with a comment ping every 15 s. The screen reads its records again on each event and closes the stream when the work ends. The stream carries no task data; a missing or invalid Bearer ID gets 401 before it opens.
 
 `POST /v1/tasks/{id}/retry`, no body: 200 with `{"task":{…}}`. A `failed` task returns to `waiting` with its attempts reset; a `waiting` or `running` one is returned unchanged, so repeating the request is harmless. `completed`, `canceled` or `obsolete` get 409 `invalid_state`; another user's or a missing task 404. While the daily limit for the task's kind of work is used up, a retry gets 429 with `cap_reached` (this user) or `ceiling_reached` (all users); the limits reset at 00:00 UTC and `GET /v1/me` shows today's `usage`.
 

@@ -9,7 +9,6 @@ private final class SessionDelegate: NSObject, URLSessionDelegate, Sendable {
     }
 }
 
-@MainActor
 final class APIClient {
     let baseURL: URL
     let configuration: URLSessionConfiguration
@@ -26,15 +25,15 @@ final class APIClient {
         self.identity = identity
         self.configuration = configuration
         configuration.timeoutIntervalForRequest = 60
+        // A session copies its configuration when created, so one configuration serves both limits in turn.
+        configuration.timeoutIntervalForResource = 180
+        let streamChannel = AsyncStream<Void>.makeStream()
+        streamingInvalidation = streamChannel.stream
+        streaming = URLSession(configuration: configuration, delegate: SessionDelegate(invalidated: streamChannel.continuation), delegateQueue: nil)
         configuration.timeoutIntervalForResource = 60
         let channel = AsyncStream<Void>.makeStream()
         invalidation = channel.stream
         session = URLSession(configuration: configuration, delegate: SessionDelegate(invalidated: channel.continuation), delegateQueue: nil)
-        let long = (configuration.copy() as? URLSessionConfiguration) ?? .ephemeral
-        long.timeoutIntervalForResource = 180
-        let streamChannel = AsyncStream<Void>.makeStream()
-        streamingInvalidation = streamChannel.stream
-        streaming = URLSession(configuration: long, delegate: SessionDelegate(invalidated: streamChannel.continuation), delegateQueue: nil)
     }
     func cancelAndWait() async {
         noticeAcknowledged = false
@@ -254,20 +253,39 @@ final class APIClient {
                     if case .failed = event { return }
                 }
                 continuation.yield(.failed(.interrupted))
-            } catch {
-                let code = (error as? URLError)?.code
-                let failed: APIError = switch code {
+            } catch let error as URLError {
+                let failed: APIError = switch error.code {
                 case .cancelled: .interrupted
                 case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .notConnectedToInternet,
                      .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot,
                      .serverCertificateNotYetValid, .secureConnectionFailed: .notSent
-                default: error is CancellationError ? .interrupted : .noAnswer
+                default: .noAnswer
                 }
                 continuation.yield(.failed(failed))
-            }
+            } catch { continuation.yield(.failed(Task.isCancelled ? .interrupted : .noAnswer)) }
         }
         continuation.onTermination = { _ in reading.cancel() }
         return events
+    }
+    // One element when the stream opens and one each time a task of this user settles (API.md, task changes), so a screen
+    // showing server work reads again only when that work changed. The streaming session's time limit ends a long wait and
+    // the stream opens again; a stream that cannot open ends the sequence, and pull to refresh still reads.
+    func taskChanges() -> AsyncStream<Void> {
+        let (changes, continuation) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var request = URLRequest(url: baseURL.appending(path: "v1/tasks/changes"))
+        request.setValue("Bearer \(identity)", forHTTPHeaderField: "Authorization")
+        let allowed = noticeAcknowledged && baseURL.scheme == "https"
+        let reading = Task { [streaming] in
+            defer { continuation.finish() }
+            guard allowed else { return }
+            while true {
+                let (bytes, response) = try await streaming.bytes(for: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+                _ = try? await bytes.lines.reduce(into: ()) { _, line in if line.hasPrefix("event:") { continuation.yield(()) } }
+            }
+        }
+        continuation.onTermination = { _ in reading.cancel() }
+        return changes
     }
     func loadPatterns() async -> Result<PatternsResponse, APIError> { decode(await response(method: "GET", path: "v1/patterns")) }
     func loadTags() async -> Result<TagList, APIError> { decode(await response(method: "GET", path: "v1/tags")) }

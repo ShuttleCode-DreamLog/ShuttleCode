@@ -34,13 +34,7 @@ struct HomeView: View {
             .task { await load() }
             // The latest dream's title and the Garden bubbles its patterns join show by themselves while the server works on it,
             // as on Journal (wiki 4.4.6, rule 3); the wait ends with the work, the tab, or a page pushed over Home.
-            .task(id: awaitingWork) {
-                var pause = 2
-                while awaitingWork, (try? await Task.sleep(for: .seconds(pause))) != nil {
-                    await load()
-                    pause = min(pause * 2, 15)
-                }
-            }
+            .readsAgain(while: awaitingWork, client: app.client) { await load() }
             .onChange(of: path) { _, value in if value.isEmpty { Task { await load() } } }
             .onChange(of: app.refreshes) { Task { await load() } }
             .onChange(of: app.homeVisits) { path = NavigationPath() }

@@ -1,7 +1,7 @@
 import SwiftUI
 import Observation
 
-@MainActor @Observable
+@Observable
 final class DiscussionModel {
     let dreamId: String
     var conversation: Conversation?

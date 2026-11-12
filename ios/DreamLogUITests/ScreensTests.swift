@@ -18,7 +18,7 @@ final class ScreensTests: XCTestCase {
     func refresh(_ app: XCUIApplication) {
         let top = app.scrollViews.firstMatch
         top.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).press(forDuration: 0.1, thenDragTo: top.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
-        sleep(3)
+        XCTAssertTrue(app.activityIndicators.firstMatch.waitForNonExistence(timeout: 15))
     }
     func testSkeletalScreens() {
         continueAfterFailure = true
@@ -30,7 +30,7 @@ final class ScreensTests: XCTestCase {
             acknowledge.tap()
         }
         XCTAssertTrue(app.buttons["typeDream"].waitForExistence(timeout: 15))
-        sleep(3)
+        XCTAssertTrue(app.activityIndicators.firstMatch.waitForNonExistence(timeout: 15))
         snapshot(app, "S00 Home")
         var seeded = false
         app.buttons["tab_notes"].tap()
@@ -60,7 +60,7 @@ final class ScreensTests: XCTestCase {
             seeded = true
         }
         // The server's worker summarizes, analyzes, indexes and matches each dream in the background.
-        if seeded { sleep(100) }
+        if seeded { XCTAssertTrue(app.staticTexts["Synced · Summary on its way"].firstMatch.waitForNonExistence(timeout: 180)) }
         refresh(app)
         snapshot(app, "S01 Journal")
         app.buttons["Filter"].tap()
@@ -70,32 +70,31 @@ final class ScreensTests: XCTestCase {
 
         app.staticTexts["Night bridge"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Edit Dream"].waitForExistence(timeout: 10))
-        sleep(3)
+        XCTAssertTrue(app.activityIndicators.firstMatch.waitForNonExistence(timeout: 15))
         snapshot(app, "S03 Dream Detail 1")
         for page in 2...4 {
             app.swipeUp()
-            sleep(1)
             snapshot(app, "S03 Dream Detail \(page)")
         }
         app.buttons["Back"].firstMatch.tap()
 
         app.buttons["tab_patterns"].tap()
-        sleep(4)
+        XCTAssertTrue(app.buttons["List"].waitForExistence(timeout: 10))
         refresh(app)
         snapshot(app, "S10 Garden")
         app.buttons["List"].tap()
-        sleep(1)
-        snapshot(app, "S06 Patterns")
         let card = app.buttons["patternCard"].firstMatch
-        if card.exists {
+        let found = card.waitForExistence(timeout: 5)
+        snapshot(app, "S06 Patterns")
+        if found {
             card.tap()
-            sleep(1)
+            XCTAssertTrue(app.buttons["Split"].waitForExistence(timeout: 5))
             snapshot(app, "S06 Pattern")
             app.buttons["Split"].tap()
-            sleep(1)
+            XCTAssertTrue(app.staticTexts["Split pattern"].waitForExistence(timeout: 5))
             snapshot(app, "S06 Split pattern")
             app.buttons["Cancel"].firstMatch.tap()
-            sleep(1)
+            XCTAssertTrue(app.staticTexts["Split pattern"].waitForNonExistence(timeout: 5))
             app.buttons["Back"].firstMatch.tap()
         }
 

@@ -25,7 +25,7 @@ let profileFields: [ProfileField] = [
     .init(key: "occupation", title: "Occupation")
 ]
 
-@MainActor @Observable
+@Observable
 final class ProfileModel {
     var stored: Profile?
     var fields: [String: String] = [:]

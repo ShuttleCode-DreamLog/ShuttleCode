@@ -24,7 +24,7 @@ This page is the agreement between the backend and the iOS app for the Skeletal 
 1. The backend ships a route with its tests and a `curl` check first, then moves its row in [API.md](API.md) from this page to "implemented". The app adds its Swift types against that.
 2. JSON keys are snake_case and timestamps are Unix milliseconds. The app decodes with `convertFromSnakeCase` and `millisecondsSince1970`, so Swift properties are the camelCase form of the keys below.
 3. The app ignores fields it does not know, but a missing or mistyped field fails decoding. The backend therefore adds a field before the app requires it. New Swift enums carry an `unknown` case so a new server value never breaks decoding.
-4. There is no push and no polling timer. A screen's `load()` reads its records, including their tasks, when the view opens, when the app returns to the foreground and on pull to refresh (wiki 4.4.6). After a changing request the app uses the record in its response.
+4. There is no polling timer. A screen's `load()` reads its records, including their tasks, when the view opens, when the app returns to the foreground and on pull to refresh (wiki 4.4.6); while it shows server work in progress it also reads again on each event of `GET /v1/tasks/changes` (API.md). After a changing request the app uses the record in its response.
 5. Every route requires `Authorization: Bearer <user_id>`, and IDs of another user answer 404.
 
 ## Errors the Skeletal routes add (wiki 4.2.3)
@@ -55,7 +55,7 @@ Implemented on the server; see [API.md](API.md#ai-tasks). The app has the target
 | `status` | string | `waiting`, `running`, `completed`, `failed`, `canceled`, `obsolete` |
 | `error_code` | string or null | Set when `failed`, or `waiting` after a failed attempt |
 
-`POST /v1/tasks/{task_id}/retry`, no body: 200 with `task`. A `waiting` or `running` task is returned unchanged; a `failed` one checks the cap (429) and returns to `waiting`. 409 `invalid_state` for `completed`, `canceled` or `obsolete`. There is no route that lists tasks: each record's read returns the tasks that concern it.
+`POST /v1/tasks/{task_id}/retry`, no body: 200 with `task`. A `waiting` or `running` task is returned unchanged; a `failed` one checks the cap (429) and returns to `waiting`. 409 `invalid_state` for `completed`, `canceled` or `obsolete`. There is no route that lists tasks: each record's read returns the tasks that concern it, and `GET /v1/tasks/changes` only says that one settled.
 
 Error codes with their own wording in the app (wiki 4.4.6): `cap_reached` and `ceiling_reached` (name the 00:00 UTC reset in local time), `rate_limited`, `provider_config`, and `provider_refused` (worded per kind of work; a refused organization or analysis is explained on the dream's screen and leaves no mark on the journal row). Any other code: "could not be completed" with retry.
 

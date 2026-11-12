@@ -92,6 +92,17 @@ async def test_scheduling_is_idempotent_and_revives_only_obsolete(client, clock)
     assert (await row(key))['status'] == 'completed'
 
 
+async def test_a_settled_task_wakes_only_its_owners_change_streams(client, clock, registry, monkeypatch):
+    _, user, dream_id = await journal(client)
+    mine, theirs = asyncio.Event(), asyncio.Event()
+    monkeypatch.setattr(tasks, 'listeners', {user: {mine}, 'someone-else': {theirs}})
+    registry['organize'] = scripted('ok')
+    await queue(user, dream_id)
+    assert await tasks.run_once()
+    assert mine.is_set() and not theirs.is_set()
+    assert (await client.get('/v1/tasks/changes')).json()['error'] == 'invalid_user'
+
+
 async def test_temporary_failures_retry_with_delays_then_complete(client, clock, registry):
     _, user, dream_id = await journal(client)
     registry['organize'] = handler = scripted(providers.ProviderError('network', True), providers.ProviderError('provider_unavailable', True), 'ok')
@@ -329,23 +340,21 @@ async def test_worker_loop_survives_errors_and_wakes_with_or_without_the_event(c
         return await claim()
     monkeypatch.setattr(tasks, 'claim', flaky)
     _, user, dream_id = await journal(client)
+    settled = asyncio.Event()
+    monkeypatch.setattr(tasks, 'listeners', {user: {settled}})
     silent = await queue(user, dream_id)
     loop = asyncio.create_task(tasks.worker())
     try:
-        for _ in range(100):
-            if (await row(silent))['status'] == 'completed':
-                break
-            await asyncio.sleep(0.02)
+        await asyncio.wait_for(settled.wait(), 2)
         assert (await row(silent))['status'] == 'completed'
         assert 'error=RuntimeError' in caplog.text and not loop.done()
         monkeypatch.setattr(config, 'WORKER_MAX_WAIT_SECONDS', 30)
+        # Lets the 0.05 s wait run out so the worker is in the 30 s one, which only the event can end in time.
         await asyncio.sleep(0.1)
+        settled.clear()
         woken = await queue(user, dream_id)
         tasks.wake.set()
-        for _ in range(50):
-            if (await row(woken))['status'] == 'completed':
-                break
-            await asyncio.sleep(0.02)
+        await asyncio.wait_for(settled.wait(), 1)
         assert (await row(woken))['status'] == 'completed'
     finally:
         loop.cancel()
