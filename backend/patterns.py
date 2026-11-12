@@ -220,7 +220,12 @@ async def select_candidates(connection, dream, new):
     blocked_groups, separated = await forbidden(connection, dream['id'])
     # A dismissed pattern keeps its tags only so that neither it nor they are offered to the AI again.
     blocked_groups |= {row['id'] for row in await connection.execute_fetchall('SELECT id FROM pattern_groups WHERE user_id=? AND dismissed_at IS NOT NULL', (dream['user_id'],))}
-    grouped = {row['tag_id']: row['group_id'] for row in await connection.execute_fetchall('SELECT tag_id,group_id FROM pattern_memberships WHERE user_id=?', (dream['user_id'],))}
+    # A dream added by hand belongs to its pattern as a whole, so its tags lead to that pattern and are never offered as loose:
+    # otherwise the AI could start a second pattern beside the one the user made, and the user's pattern would never grow.
+    grouped = {}
+    for row in await connection.execute_fetchall(f"SELECT tag_id,group_id FROM pattern_memberships WHERE user_id=? UNION SELECT c.tag_id,p.group_id FROM pattern_dreams p JOIN pattern_groups g ON g.id=p.group_id JOIN current_occurrences c ON c.dream_id=p.dream_id WHERE p.user_id=? AND g.dismissed_at IS NULL", (dream['user_id'], dream['user_id'])):
+        grouped.setdefault(row['tag_id'], set()).add(row['group_id'])
+    blocked_groups |= {row['group_id'] for row in await connection.execute_fetchall('SELECT group_id FROM pattern_dreams WHERE dream_id=?', (dream['id'],))}
     pool = {row['tag_id']: row for row in await connection.execute_fetchall('SELECT * FROM current_occurrences WHERE user_id=? AND dream_id<>?', (dream['user_id'], dream['id']))}
     groups, loose = {}, {}
     for occurrence in new:
@@ -234,8 +239,8 @@ async def select_candidates(connection, dream, new):
         for tag_id in (tagged + near)[:config.MAX_CANDIDATES]:
             distance = distances.get(tag_id, 2.0)
             if tag_id in grouped:
-                if grouped[tag_id] not in blocked_groups:
-                    groups[grouped[tag_id]] = min(distance, groups.get(grouped[tag_id], 2.0))
+                for group_id in grouped[tag_id] - blocked_groups:
+                    groups[group_id] = min(distance, groups.get(group_id, 2.0))
             elif pool[tag_id]['dream_id'] not in separated:
                 loose[tag_id] = min(distance, loose.get(tag_id, 2.0))
     chosen = sorted([('group', key, value) for key, value in groups.items()] + [('loose', key, value) for key, value in loose.items()], key=lambda item: item[2])[:config.MAX_MATCH_CANDIDATES]
@@ -262,7 +267,8 @@ async def match_content(connection, dream, new, group_ids, loose, states):
     blocks.append('Candidate groups:' if group_ids else 'Candidate groups:\nNone.')
     for number, group_id in enumerate(group_ids, 1):
         group = groups[group_id]
-        lines = [f'G{number}:'] + ([f"Label: {group['label']}", f"Description: {group['description']}"] if group['label'] else [])
+        # A pattern made by hand has no AI label or description until its first refresh; the user's own name is never sent.
+        lines = [f'G{number}:'] + [f'{name}: {group[name.lower()]}' for name in ('Label', 'Description') if group[name.lower()]]
         lines += [f"Example: {member['category']}: {member['description']}. Excerpt: {member['excerpt']}" for member in examples_of(states[group_id], config.GROUP_EXAMPLES)]
         blocks.append('\n'.join(lines))
     blocks.append('Ungrouped candidates:' if loose else 'Ungrouped candidates:\nNone.')
@@ -333,7 +339,7 @@ async def apply_decisions(connection, dream, decisions):
         if own is None or own['group_id'] is not None:
             continue
         if decision['action'] == 'join':
-            if decision['target'] in blocked_groups or not await connection.execute_fetchall('SELECT 1 FROM pattern_groups WHERE id=? AND dismissed_at IS NULL', (decision['target'],)):
+            if decision['target'] in blocked_groups or not await connection.execute_fetchall('SELECT 1 FROM pattern_groups WHERE id=? AND dismissed_at IS NULL', (decision['target'],)) or await connection.execute_fetchall('SELECT 1 FROM pattern_dreams WHERE group_id=? AND dream_id=?', (decision['target'], dream['id'])):
                 continue
             group_id = decision['target']
         else:

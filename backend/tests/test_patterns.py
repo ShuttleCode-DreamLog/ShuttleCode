@@ -829,3 +829,41 @@ async def test_a_pattern_made_by_hand_keeps_its_name(client, clock, ai):
     await run_all()
     after = next(f for f in (await found(client, headers))['findings'] if f['group_id'] == finding['group_id'])
     assert (after['label'], after['status']) == ('School and trains', 'current') and after['explanation']
+
+
+def join_any_group(content):
+    occurrences, _, groups = parsed(content)
+    return {'decisions': [decision(label, 'join', 'G1', 'shared exam') if groups else decision(label) for label, _ in occurrences]}
+
+
+async def test_a_pattern_made_by_hand_grows_and_its_tags_are_not_loose(client, clock, ai):
+    headers, user = person()
+    a = await dream(client, headers, user, 'exam')
+    b = await dream(client, headers, user, 'lake')
+    c = await journal(client, headers, 'Not tagged yet.')
+    made = (await client.post('/v1/patterns/groups', headers=headers, json={'label': 'Tests', 'dream_ids': [a, b, c]})).json()
+    group_id = next(f['group_id'] for f in made['findings'] if f['label'] == 'Tests')
+    await run_all()
+    ai.match = join_any_group
+    # A member's own new tags are not matched back into the pattern it already supports.
+    await organized(user, c, [('object', 'the exam', 'exam')])
+    await run_all()
+    assert not await db.rwdb.execute_fetchall('SELECT 1 FROM pattern_memberships WHERE dream_id=?', (c,))
+    calls = len(ai.calls)
+    d = await dream(client, headers, user, 'exam')
+    matching = [call.content for call in ai.calls[calls:] if call.name == 'matching']
+    assert matching and re.search(r'^G1:', matching[0], re.M) and 'Tests' not in matching[0] and not re.search(r'^U\d+: object: the exam', matching[0], re.M)
+    assert (await db.rwdb.execute_fetchall('SELECT group_id FROM pattern_memberships WHERE dream_id=?', (d,)))[0][0] == group_id
+    assert next(f for f in (await found(client, headers))['findings'] if f['group_id'] == group_id)['supporting_dreams'] == 4
+
+
+async def test_a_dismissed_hand_pattern_is_not_offered(client, clock, ai):
+    headers, user = person()
+    a = await dream(client, headers, user, 'exam')
+    b = await dream(client, headers, user, 'lake')
+    group_id = next(f['group_id'] for f in (await client.post('/v1/patterns/groups', headers=headers, json={'label': 'Tests', 'dream_ids': [a, b]})).json()['findings'] if f['label'] == 'Tests')
+    await client.delete(f'/v1/patterns/groups/{group_id}', headers=headers)
+    await run_all()
+    calls = len(ai.calls)
+    await dream(client, headers, user, 'exam')
+    assert all(not re.search(r'^G\d+:', call.content, re.M) for call in ai.calls[calls:] if call.name == 'matching')
