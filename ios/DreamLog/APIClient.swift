@@ -278,10 +278,16 @@ final class APIClient {
         let reading = Task { [streaming] in
             defer { continuation.finish() }
             guard allowed else { return }
-            while true {
+            while !Task.isCancelled {
                 let (bytes, response) = try await streaming.bytes(for: request)
                 guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
-                _ = try? await bytes.lines.reduce(into: ()) { _, line in if line.hasPrefix("event:") { continuation.yield(()) } }
+                do {
+                    for try await line in bytes.lines {
+                        if line.hasPrefix("event:") { continuation.yield(()) }
+                    }
+                } catch {
+                    if Task.isCancelled { return }
+                }
             }
         }
         continuation.onTermination = { _ in reading.cancel() }
