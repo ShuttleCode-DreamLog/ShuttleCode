@@ -29,6 +29,9 @@ struct SettingsView: View {
             }
             .dreamPage()
             .page(Header("Settings") { HomeButton() })
+            .reloadable { await model.load() }
+            .task { await model.load() }
+            .onChange(of: model.refreshes) { Task { await model.load() } }
         }
     }
 }
