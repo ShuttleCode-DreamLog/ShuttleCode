@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-@MainActor @Observable
+@Observable
 final class JournalModel {
     var items: [JournalItem] = []
     var drafts: [Draft] = []

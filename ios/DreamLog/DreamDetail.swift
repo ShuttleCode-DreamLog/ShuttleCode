@@ -16,7 +16,7 @@ extension View {
     }
 }
 
-@MainActor @Observable
+@Observable
 final class AnalysisModel {
     let dreamId: String
     var analysis: Analysis?
@@ -197,13 +197,7 @@ struct DreamDetailView: View {
         .task { await load() }
         // While the summary and tags or the analysis are still being made on the server, the page waits and reads again, so the
         // result appears by itself (wiki 4.4.6, rule 3); the wait ends with the page or the work.
-        .task(id: awaitingWork) {
-            var pause = 2
-            while awaitingWork, (try? await Task.sleep(for: .seconds(pause))) != nil {
-                await load()
-                pause = min(pause * 2, 15)
-            }
-        }
+        .readsAgain(while: awaitingWork, client: app.client) { await load() }
         .reloadable { await load() }
         .onChange(of: app.refreshes) { Task { await load() } }
         .confirmationDialog("Delete this dream? Deleting this dream also removes the analyses of other dreams and the discussion replies that were written with it.", isPresented: $confirmingDelete, titleVisibility: .visible) {

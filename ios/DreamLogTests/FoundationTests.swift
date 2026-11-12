@@ -31,7 +31,7 @@ nonisolated final class BackendProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() { Self.state.withLock { $0.cancelled += 1 } }
 }
 
-@Suite(.serialized) @MainActor
+@Suite(.serialized)
 struct FoundationTests {
     func configuration() -> URLSessionConfiguration {
         BackendProtocol.state.withLock { $0 = .init() }

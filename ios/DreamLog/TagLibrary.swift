@@ -24,7 +24,7 @@ extension LibraryTag {
     }
 }
 
-@MainActor @Observable
+@Observable
 final class TagLibraryModel {
     var tags: [LibraryTag] = []
     var busy = false

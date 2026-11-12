@@ -5,7 +5,7 @@ import UserNotifications
 
 nonisolated enum AppTab: Hashable { case journal, patterns, notes, settings }
 
-@MainActor @Observable
+@Observable
 final class AppModel {
     var me: Me?
     var limits = Limits()

@@ -51,6 +51,16 @@ extension View {
     func reloadable(_ load: @escaping @MainActor () async -> Void) -> some View {
         refreshable { await Task { await load() }.value }
     }
+    // Server work a screen shows ends without the phone asking, so the screen suspends on the task change stream and reads
+    // again on each change; the stream ends when the work, the screen or the journal does.
+    // Known limitation: an event that lands while another load of the same screen runs is skipped by that load's guard; if
+    // that load had read before the work settled, the screen waits for the next change, foreground or pull to refresh.
+    func readsAgain(while waiting: Bool, client: APIClient?, load: @escaping @MainActor () async -> Void) -> some View {
+        task(id: waiting) {
+            guard waiting, let client else { return }
+            for await _ in client.taskChanges() { await load() }
+        }
+    }
 }
 
 struct Eyebrow: View {

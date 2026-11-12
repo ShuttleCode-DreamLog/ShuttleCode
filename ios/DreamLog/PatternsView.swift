@@ -1,7 +1,7 @@
 import SwiftUI
 import Observation
 
-@MainActor @Observable
+@Observable
 final class PatternsModel {
     var response: PatternsResponse?
     var error: String?

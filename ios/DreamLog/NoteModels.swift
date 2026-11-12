@@ -60,7 +60,7 @@ nonisolated struct MemorySave: Encodable {
     }
 }
 
-@MainActor @Observable
+@Observable
 final class NotesModel {
     var items: [Memory] = []
     var hasMore = false
@@ -85,7 +85,7 @@ final class NotesModel {
     }
 }
 
-@MainActor @Observable
+@Observable
 final class NoteEditorModel {
     var id: String
     var stored: Memory?
